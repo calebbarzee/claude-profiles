@@ -51,6 +51,33 @@ fields resolve by rule rather than by an exhaustive list:
 APP_TRUTH is the default for any unrecognised field, so a field added by a
 future app version is carried through with the app's own value rather than
 being dropped or guessed at.
+
+WORKING DIRECTORY
+
+A session's folder appears in the entry more than once. Alongside top-level
+cwd and originCwd, promptAppendSnapshot embeds its own cwd, and that field is
+APP_TRUTH, so copying it verbatim gave every generated session the TEMPLATE
+session's folder. Any key named cwd or originCwd is therefore retargeted at
+any depth, and the run verifies afterwards that no working-directory value in
+the written entry disagrees with the session's own.
+
+The folder itself is the launch directory, the first cwd the transcript
+records. Later values are subdirectories the run stepped into, so the most
+common value picks a subdirectory whenever the run worked mostly below the
+root. Entries the app writes always set cwd == originCwd.
+
+DUPLICATES
+
+An index entry claims a CLI session through cliSessionId, and also through
+priorCliSessionIds, which is how the app records a session resumed or
+compacted into a new CLI id. Both count as already present. Nothing already
+present is re-imported or overwritten by default; those sessions are listed
+at the end of a run with the --overwrite command for each.
+
+--overwrite replaces the existing entry when that entry is the same session.
+When a later session merely absorbed this one as a prior id, it adds a second
+entry instead and leaves the newer conversation alone, since removing it
+would delete a session that is not the one being imported.
 """
 
 from __future__ import annotations
@@ -296,7 +323,15 @@ def derive(lines: list[dict], transcript: Path) -> dict:
         if d.get("type") == "bridge-session"
     ]
 
-    fallback = cwds.most_common(1)[0][0] if cwds else str(Path.home())
+    # The launch directory is the session's folder. Later cwd values are
+    # subdirectories the run stepped into: 19 of 36 transcripts on the machine
+    # this was written against record more than one cwd, and every extra value
+    # was a deeper path under the first. Taking the most common one therefore
+    # picks a subdirectory whenever the run spent most of its turns below the
+    # root. Every index entry the app itself wrote sets cwd == originCwd, so
+    # both take the launch directory and the most common value is only a
+    # fallback for a transcript that records no cwd on its first lines.
+    launch = origin or (cwds.most_common(1)[0][0] if cwds else str(Path.home()))
 
     # The filename is authoritative. A sidechain carries its PARENT's
     # sessionId on every line, so trusting the in-file value would let a
@@ -305,8 +340,8 @@ def derive(lines: list[dict], transcript: Path) -> dict:
         "cliSessionId": transcript.stem,
         "_isSidechain": SUBAGENT_DIR in transcript.parts
         and all(d.get("isSidechain") for d in lines if "isSidechain" in d),
-        "cwd": fallback,
-        "originCwd": origin or fallback,
+        "cwd": launch,
+        "originCwd": launch,
         "createdAt": stamps[0] if stamps else 0,
         "lastActivityAt": stamps[-1] if stamps else 0,
         "lastFocusedAt": stamps[-1] if stamps else 0,
@@ -389,16 +424,65 @@ def load_template(scope: Path, explicit: Path | None) -> tuple[dict, Path]:
     return json.loads(entries[0].read_text()), entries[0]
 
 
-def indexed_cli_ids(scope: Path) -> set[str]:
-    out = set()
-    for f in scope.glob("local_*.json"):
+def indexed_cli_map(scope: Path) -> dict[str, dict]:
+    """Every CLI session id this profile already accounts for.
+
+    An index entry claims a CLI session two ways:
+
+      cliSessionId        the entry IS that session
+      priorCliSessionIds  the entry is a LATER segment that absorbed it, which
+                          is how the app records a session that was resumed or
+                          compacted into a new CLI id
+
+    Both count as present. Reading only cliSessionId is what let an already
+    imported session be migrated a second time as a separate conversation.
+
+    Maps id -> {entry, sessionId, title, via}. A direct claim wins over an
+    absorbed one when an id somehow appears as both.
+    """
+    out: dict[str, dict] = {}
+    for f in sorted(scope.glob("local_*.json")):
         try:
-            got = json.loads(f.read_text()).get("cliSessionId")
+            data = json.loads(f.read_text())
         except Exception:
             continue
-        if isinstance(got, str):
-            out.add(got)
+        claims: list[tuple[str, str]] = []
+        direct = data.get("cliSessionId")
+        if isinstance(direct, str):
+            claims.append((direct, "cliSessionId"))
+        priors = data.get("priorCliSessionIds")
+        if isinstance(priors, list):
+            claims.extend((p, "priorCliSessionIds") for p in priors if isinstance(p, str))
+        for cli_id, via in claims:
+            if cli_id in out and out[cli_id]["via"] == "cliSessionId":
+                continue
+            out[cli_id] = {
+                "entry": f,
+                "sessionId": data.get("sessionId", f.stem),
+                "title": data.get("title") or "(untitled)",
+                "via": via,
+            }
     return out
+
+
+def duplicate_report(dupes: dict[str, dict], profile: Path) -> None:
+    """List CLI sessions the profile already has, and how to force each one."""
+    if not dupes:
+        return
+    print()
+    print(f"  {len(dupes)} CLI session{'s' if len(dupes) != 1 else ''} already in this profile — not re-imported:")
+    print()
+    for cli_id in sorted(dupes, key=lambda i: dupes[i]["title"]):
+        d = dupes[cli_id]
+        print(f"    {cli_id}  {d['title'][:44]}")
+        if d["via"] == "cliSessionId":
+            print(f"      is        {d['sessionId']}")
+            print("      overwrite replaces that entry:")
+        else:
+            print(f"      absorbed into {d['sessionId']}  ({d['title'][:34]})")
+            print("      overwrite adds a SECOND entry; the newer one is left alone:")
+        print(f'        {Path(__file__).name} --to "{profile}" --overwrite {cli_id}')
+        print()
 
 
 def profile_is_running(profile: Path) -> bool:
@@ -416,9 +500,59 @@ def profile_is_running(profile: Path) -> bool:
 # --------------------------------------------------------------------------
 
 
+def retarget_cwd(value, cwd: str, hits: Counter):
+    """Point every nested working-directory field at this session's folder.
+
+    APP_TRUTH fields are copied wholesale from a template entry the app wrote,
+    and some of them embed that template session's own folder. The observed
+    case is promptAppendSnapshot, a dict of
+    {append, cliVersion, cwd, settingsKey} whose cwd tracked the entry's own
+    cwd in every app-written entry inspected. Copied verbatim it hands every
+    generated session the template's folder, which is what made migrated
+    sessions open against the wrong directory.
+
+    Only keys named in STRUCTURAL_KEYS are touched, at any depth, so a field
+    added by a future app version is still carried through untouched unless it
+    names a working directory.
+    """
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if k in STRUCTURAL_KEYS and isinstance(v, str):
+                out[k] = cwd
+                hits.update([k])
+            else:
+                out[k] = retarget_cwd(v, cwd, hits)
+        return out
+    if isinstance(value, list):
+        return [retarget_cwd(v, cwd, hits) for v in value]
+    return value
+
+
+def walk_cwds(value, path: str = "") -> list[tuple[str, str]]:
+    """Every working-directory value in an entry, with where it was found.
+
+    Used to verify after writing that no field still names the template's
+    folder instead of this session's.
+    """
+    found: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        for k, v in value.items():
+            here = f"{path}.{k}" if path else k
+            if k in STRUCTURAL_KEYS and isinstance(v, str):
+                found.append((here, v))
+            else:
+                found.extend(walk_cwds(v, here))
+    elif isinstance(value, list):
+        for i, v in enumerate(value):
+            found.extend(walk_cwds(v, f"{path}[{i}]"))
+    return found
+
+
 def build_entry(template: dict, facts: dict, cli_session_id: str, perms: dict) -> tuple[dict, Counter]:
     entry: dict = {}
     tally: Counter = Counter()
+    nested: Counter = Counter()
 
     def clone(value):
         return json.loads(json.dumps(value))
@@ -432,7 +566,8 @@ def build_entry(template: dict, facts: dict, cli_session_id: str, perms: dict) -
             entry[key] = None
             tally.update(["DERIVED"])
         else:
-            entry[key], _ = clone(value), tally.update(["APP_TRUTH"])
+            entry[key] = retarget_cwd(clone(value), facts["cwd"], nested)
+            tally.update(["APP_TRUTH"])
 
     for key, value in NEUTRAL.items():
         if key not in entry:
@@ -457,6 +592,9 @@ def build_entry(template: dict, facts: dict, cli_session_id: str, perms: dict) -
         entry[key] = facts[key] if facts[key] is not None else template.get(key)
     entry.setdefault("titleSource", template.get("titleSource", "auto"))
 
+    if nested:
+        tally.update({"RETARGETED": sum(nested.values())})
+
     return entry, tally
 
 
@@ -474,6 +612,7 @@ def import_one(
     remap: tuple[str, str] | None,
     rewrite_content: bool,
     allow_sidechain: bool,
+    replaces: dict | None = None,
 ) -> dict:
     digest = sha256(transcript)
     lines = read_lines(transcript)
@@ -494,6 +633,19 @@ def import_one(
     work.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(transcript, pristine)
     shutil.copy2(transcript, work)
+
+    # A session that is still running keeps appending to its own transcript.
+    # Staging a moving file would import half a conversation, and failing hard
+    # here would abandon the entries already written by earlier sessions in
+    # this batch, before manifest.json exists for --undo to read. Skip it and
+    # let the caller report it instead.
+    if sha256(transcript) != digest:
+        return {
+            "skipped": "transcript changed while being staged — that session is still running",
+            "title": facts["title"],
+            "sourceCliSessionId": facts["cliSessionId"],
+            "originalTranscript": str(transcript),
+        }
 
     published_id = facts["cliSessionId"]
     published: Path | None = None
@@ -531,11 +683,38 @@ def import_one(
     dest = scope / f"{entry['sessionId']}.json"
     if dest.exists():
         die(f"refusing to overwrite {dest}")
+
+    # Replacing an existing entry only ever happens under --overwrite, and only
+    # for an entry whose own cliSessionId is this session. An entry that merely
+    # absorbed this session as a prior id belongs to a later session and is
+    # never removed, or that newer conversation would disappear.
+    replaced_backup = None
+    replaced_path = None
+    if replaces and replaces["via"] == "cliSessionId":
+        old_entry = Path(replaces["entry"])
+        if old_entry.is_file():
+            backup_dir = staging / "replaced"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            replaced_backup = backup_dir / old_entry.name
+            shutil.copy2(old_entry, replaced_backup)
+            replaced_path = old_entry
+            old_entry.unlink()
+
     dest.write_text(json.dumps(entry))
     (staging / "work" / dest.name).write_text(json.dumps(entry, indent=2))
 
+    # Same race, caught after the write. Roll this one session back rather than
+    # aborting a batch whose manifest does not exist yet.
     if sha256(transcript) != digest:
-        die(f"original transcript changed during import: {transcript}")
+        dest.unlink(missing_ok=True)
+        if replaced_backup and replaced_path:
+            shutil.copy2(replaced_backup, replaced_path)
+        return {
+            "skipped": "transcript changed during import — that session is still running",
+            "title": facts["title"],
+            "sourceCliSessionId": facts["cliSessionId"],
+            "originalTranscript": str(transcript),
+        }
 
     return {
         "indexEntry": str(dest),
@@ -555,6 +734,10 @@ def import_one(
         "rewroteContent": bool(remap and rewrite_content),
         "pathRewrites": hits,
         "fieldTally": dict(tally),
+        "replacedEntryPath": str(replaced_path) if replaced_path else None,
+        "replacedEntryBackup": str(replaced_backup) if replaced_backup else None,
+        "duplicateOf": replaces["sessionId"] if replaces else None,
+        "duplicateVia": replaces["via"] if replaces else None,
     }
 
 
@@ -599,6 +782,21 @@ def do_undo(staging: Path, only: list[str]) -> None:
             print(f"  removed index  {title}")
         else:
             print(f"  already gone   {title}")
+
+        # An --overwrite run displaced an entry the app had written. Put it
+        # back before anything else, so undoing a forced import leaves the
+        # profile exactly as it was.
+        backup = rec.get("replacedEntryBackup")
+        target = rec.get("replacedEntryPath")
+        if backup and target:
+            backup_path, target_path = Path(backup), Path(target)
+            if not backup_path.is_file():
+                print(f"  WARN backup missing, cannot restore {target_path.name}")
+            elif target_path.exists():
+                print(f"  kept existing  {target_path.name} (already back in place)")
+            else:
+                shutil.copy2(backup_path, target_path)
+                print(f"  restored index {target_path.name}")
 
         pub = rec.get("publishedTranscript")
         if pub:
@@ -688,6 +886,15 @@ def main() -> None:
         action="store_true",
         help="permit importing a subagent sidechain (normally refused)",
     )
+    ap.add_argument(
+        "--overwrite",
+        action="append",
+        default=[],
+        metavar="ID",
+        help="re-import a CLI session the profile already has (repeatable). "
+        "Replaces the existing entry when that entry is the same session; adds "
+        "a second entry when a later session merely absorbed it.",
+    )
     ap.add_argument("--undo", type=Path, metavar="STAGING", help="reverse a previous run")
     ap.add_argument(
         "--only",
@@ -706,15 +913,16 @@ def main() -> None:
     if args.list:
         rows = [r for r in (summarize(f) for f in top_level_transcripts()) if r]
         rows.sort(key=lambda r: r["lastActivityAt"], reverse=True)
-        indexed: set[str] = set()
+        indexed: dict[str, dict] = {}
         if args.to:
             try:
-                indexed = indexed_cli_ids(session_scope(args.to.expanduser().resolve()))
+                indexed = indexed_cli_map(session_scope(args.to.expanduser().resolve()))
             except SystemExit:
-                indexed = set()
+                indexed = {}
         print(f"{'':2}{'SESSION':38} {'TURNS':>5} {'AGENTS':>6}  TITLE")
         for row in rows[: args.limit or 20]:
-            mark = "*" if row["cliSessionId"] in indexed else " "
+            got = indexed.get(row["cliSessionId"])
+            mark = " " if not got else ("*" if got["via"] == "cliSessionId" else "+")
             print(
                 f"{mark:2}{row['cliSessionId']:38} {row['turns']:>5} "
                 f"{row['subagents']:>6}  {row['title'][:44]}"
@@ -723,13 +931,15 @@ def main() -> None:
         print(f"\n{len(rows)} sessions in {CLI_PROJECTS}")
         if hidden:
             print(f"{hidden} subagent sidechains hidden (rendered inline, never importable)")
-        if indexed:
+        if any(v["via"] == "cliSessionId" for v in indexed.values()):
             print("* already indexed in the target profile")
+        if any(v["via"] == "priorCliSessionIds" for v in indexed.values()):
+            print("+ already in the profile, absorbed into a later session")
         return
 
     if not args.to:
         die("--to is required")
-    if not args.session and not args.limit:
+    if not args.session and not args.limit and not args.overwrite:
         die("pass --session <id>, or --limit N for a batch (or --list to browse)")
 
     profile = args.to.expanduser().resolve()
@@ -740,7 +950,9 @@ def main() -> None:
 
     scope = session_scope(profile)
     template, template_path = load_template(scope, args.template)
-    already = indexed_cli_ids(scope)
+    already = indexed_cli_map(scope)
+    forced = set(args.overwrite)
+    unknown_forced = forced - set(already)
     perms, perm_why = resolve_permissions()
 
     remap = None
@@ -755,6 +967,12 @@ def main() -> None:
         die("--rewrite-content only means something together with --remap")
 
     # ---- select ----------------------------------------------------------
+    # A session the profile already has is never re-imported on its own. It
+    # only enters the target list when named in --overwrite, and duplicates
+    # that were skipped are reported afterwards with the command to force each.
+    targets: list[Path] = []
+    skipped: dict[str, dict] = {}
+
     if args.session:
         if args.session.endswith(".jsonl"):
             targets = [Path(args.session).expanduser()]
@@ -762,15 +980,40 @@ def main() -> None:
             matches = [p for p in top_level_transcripts() if p.stem == args.session]
             if not matches:
                 die(f"no session {args.session}. Use --list to browse.")
-            targets = matches[:1]
-    else:
+            if args.session in already and args.session not in forced:
+                skipped[args.session] = already[args.session]
+            else:
+                targets = matches[:1]
+    elif args.limit:
         rows = [r for r in (summarize(f) for f in top_level_transcripts()) if r]
-        rows = [r for r in rows if r["cliSessionId"] not in already]
         rows.sort(key=lambda r: r["lastActivityAt"], reverse=True)
-        targets = [r["path"] for r in rows[: args.limit]]
-        if not targets:
+        skipped.update(
+            {r["cliSessionId"]: already[r["cliSessionId"]] for r in rows if r["cliSessionId"] in already}
+        )
+        fresh = [r for r in rows if r["cliSessionId"] not in already]
+        targets = [r["path"] for r in fresh[: args.limit]]
+
+    for cli_id in args.overwrite:
+        matches = [p for p in top_level_transcripts() if p.stem == cli_id]
+        if not matches:
+            die(f"no session {cli_id}. Use --list to browse.")
+        if matches[0] not in targets:
+            targets.append(matches[0])
+        skipped.pop(cli_id, None)
+
+    if unknown_forced:
+        print("  note: --overwrite named ids the profile does not have; importing normally:")
+        for cli_id in sorted(unknown_forced):
+            print(f"    {cli_id}")
+        print()
+
+    if not targets:
+        if skipped:
+            print("Nothing to import — every session is already in this profile.")
+            duplicate_report(skipped, profile)
+        else:
             print("Nothing to import — every session is already indexed.")
-            return
+        return
 
     # ---- report ----------------------------------------------------------
     acct, org = scope.parent.name, scope.name
@@ -797,7 +1040,13 @@ def main() -> None:
             extra = f", {got['subagents']} subagents" if got["subagents"] else ""
             print(f"    {got['title'][:50]}  ({got['turns']} turns{extra})")
         if t.stem in already:
-            print("      NOTE already indexed in this profile")
+            existing = already[t.stem]
+            if existing["via"] == "cliSessionId":
+                print(f"      OVERWRITE replaces {existing['sessionId']}")
+            else:
+                print(f"      OVERWRITE adds a second entry; {existing['sessionId']} kept")
+
+    duplicate_report(skipped, profile)
 
     if args.dry_run:
         print("\nDry run — nothing written.")
@@ -808,13 +1057,36 @@ def main() -> None:
     staging = (args.staging or Path.home() / f"claude-cli-migration-{stamp}").expanduser()
     staging.mkdir(parents=True, exist_ok=True)
 
-    records = []
+    records, unfinished = [], []
     for t in targets:
-        records.append(
-            import_one(
-                t, scope, template, staging, perms, remap, args.rewrite_content, args.allow_sidechain
-            )
+        got = import_one(
+            t,
+            scope,
+            template,
+            staging,
+            perms,
+            remap,
+            args.rewrite_content,
+            args.allow_sidechain,
+            already.get(t.stem) if t.stem in forced else None,
         )
+        (unfinished if got.get("skipped") else records).append(got)
+
+    if unfinished:
+        print()
+        print(f"  {len(unfinished)} session{'s' if len(unfinished) != 1 else ''} skipped, nothing written for them:")
+        for rec in unfinished:
+            print(f"    {rec['title'][:50]}")
+            print(f"      {rec['sourceCliSessionId']}")
+            print(f"      {rec['skipped']}")
+        print()
+
+    if not records:
+        (staging / MANIFEST_NAME).write_text(
+            json.dumps({"imports": [], "skipped": unfinished}, indent=2)
+        )
+        print("Nothing was imported.")
+        return
 
     manifest = {
         "createdAt": dt.datetime.now().isoformat(timespec="seconds"),
@@ -823,6 +1095,7 @@ def main() -> None:
         "staging": str(staging),
         "permissions": perms,
         "imports": records,
+        "skipped": unfinished,
     }
     (staging / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2))
 
@@ -845,8 +1118,27 @@ def main() -> None:
         if not pointed.is_file():
             print(f"  FAIL index points at missing transcript: {pointed}")
             ok = False
+
+        # Every working-directory field, nested ones included, must name this
+        # session's folder. A mismatch means a template path was carried
+        # through and the session would open against the wrong directory.
+        written = json.loads(entry.read_text())
+        stray = [
+            f"{where}={value}"
+            for where, value in walk_cwds(written)
+            if value != rec["cwd"]
+        ]
+        if stray:
+            print(f"  FAIL wrong working directory in {entry.name}: {', '.join(stray)}")
+            ok = False
+
+        backup = rec.get("replacedEntryBackup")
+        if backup and not Path(backup).is_file():
+            print(f"  FAIL replaced entry not backed up: {rec['replacedEntryPath']}")
+            ok = False
     if ok:
-        print(f"  ok  {len(records)} originals unchanged, index entries valid, transcripts resolvable")
+        note = "originals unchanged, index entries valid, transcripts resolvable, cwd consistent"
+        print(f"  ok  {len(records)} {note}")
     print()
     print(f"Manifest: {staging / MANIFEST_NAME}")
     print("Undo everything:")
