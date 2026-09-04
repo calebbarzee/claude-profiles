@@ -1,0 +1,6 @@
+node_modules/
+.raycast-swift-build/
+.DS_Store
+package-lock.json
+.tmp/
+dist/
