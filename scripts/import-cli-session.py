@@ -148,6 +148,14 @@ NEUTRAL: dict[str, object] = {
     "lastSpawnRootDetected": False,
 }
 
+# Stale run state. These record something that happened to the TEMPLATE
+# session, most often a rate limit, and the app shows an error badge for them.
+# Copied as APP_TRUTH they put that badge on every session a run generates,
+# which is how 18 entries in one profile ended up reporting a session limit
+# that none of them ever hit. Absent from the entry entirely, not set empty,
+# because that is how an entry with no error reads.
+STALE_RUN_STATE = ("error", "errorAt", "priorErrorMark")
+
 # Most conservative values attested in the app bundle. Recovered by grepping
 # app.asar rather than invented, so they are guaranteed to be valid enum
 # members: chromePermissionMode admits skip_all_permission_checks and
@@ -208,6 +216,17 @@ ROTE_COMMANDS = frozenset(
 # the command itself, then its output. All three count toward completedTurns,
 # which is why a session holding only /exit reports three turns.
 COMMAND_NAME = re.compile(r"<command-name>\s*(/?[\w:.-]+)\s*</command-name>")
+
+# A desktop chat started without attaching a folder runs in a scratch
+# workspace under the profile's own userData. The app computes that root as
+# join(userData, "scratch-workspaces") with no setting behind it, and matches
+# the shape below; this pattern is the app's own, read out of the bundle.
+# Such a directory is app-internal and holds nothing once the session ends, so
+# a migrated session pointing at one names a folder that no longer exists.
+SCRATCH_WORKSPACE = re.compile(
+    r"[/\\]scratch-workspaces[/\\][^/\\]+[/\\][^/\\]+[/\\]scratch-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}(?:[/\\]|$)"
+)
+DEFAULT_SCRATCH_DIR = Path.home() / "4_temp" / "claude" / "scratch"
 COMMAND_SCAFFOLD = ("<local-command-caveat>", "<local-command-stdout>", "<local-command-stderr>")
 
 
@@ -419,6 +438,7 @@ def summarize(transcript: Path) -> dict | None:
         "subagents": len(list(subagent_dir_for(transcript).glob("*.jsonl"))),
         "realTurns": real,
         "commands": commands,
+        "isScratch": bool(cwd and SCRATCH_WORKSPACE.search(cwd)),
         # Nothing the user ever said or ran. Imports as an empty conversation,
         # so it is always skipped.
         "isEmpty": real == 0 and not commands,
@@ -606,6 +626,55 @@ def contentless_report(rows: list[dict]) -> None:
     print()
 
 
+def all_session_scopes() -> list[Path]:
+    """Every <account>/<org> session scope on this machine, any profile.
+
+    Used only to learn which CLI sessions the app has absorbed into a later
+    one. That lineage lives in priorCliSessionIds and nowhere else: a
+    successor's transcript never names its predecessor, so a profile that has
+    not seen the pair cannot work it out alone. Reading every profile lets a
+    fresh profile inherit what another one already knows.
+    """
+    roots = [Path.home() / "Library" / "Application Support" / "Claude"]
+    profiles = Path.home() / "Library" / "Application Support" / "Claude Profiles"
+    if profiles.is_dir():
+        roots.extend(p for p in profiles.iterdir() if p.is_dir())
+
+    scopes = []
+    for root in roots:
+        base = root / "claude-code-sessions"
+        if not base.is_dir():
+            continue
+        for acct in base.iterdir():
+            if not acct.is_dir():
+                continue
+            scopes.extend(org for org in acct.iterdir() if org.is_dir())
+    return scopes
+
+
+def lineage_map(scopes: list[Path]) -> dict[str, dict]:
+    """absorbed CLI session id -> the later session that absorbed it."""
+    out: dict[str, dict] = {}
+    for scope in scopes:
+        for f in sorted(scope.glob("local_*.json")):
+            try:
+                data = json.loads(f.read_text())
+            except Exception:
+                continue
+            successor = data.get("cliSessionId")
+            priors = data.get("priorCliSessionIds")
+            if not isinstance(successor, str) or not isinstance(priors, list):
+                continue
+            for prior in priors:
+                if isinstance(prior, str) and prior != successor:
+                    out[prior] = {
+                        "successor": successor,
+                        "title": data.get("title") or "(untitled)",
+                        "knownFrom": scope.parent.parent.parent.name,
+                    }
+    return out
+
+
 def duplicate_report(dupes: dict[str, dict], profile: Path) -> None:
     """List CLI sessions the profile already has, and how to force each one."""
     if not dupes:
@@ -699,6 +768,9 @@ def build_entry(template: dict, facts: dict, cli_session_id: str, perms: dict) -
         return json.loads(json.dumps(value))
 
     for key, value in template.items():
+        if key in STALE_RUN_STATE:
+            tally.update(["DROPPED"])
+            continue
         if key in NEUTRAL:
             entry[key], _ = clone(NEUTRAL[key]), tally.update(["NEUTRAL"])
         elif key in perms:
@@ -754,12 +826,21 @@ def import_one(
     rewrite_content: bool,
     allow_sidechain: bool,
     replaces: dict | None = None,
+    cwd_override: str | None = None,
 ) -> dict:
     digest = sha256(transcript)
     lines = read_lines(transcript)
     if not lines:
         die(f"transcript has no parseable lines: {transcript}")
     facts = derive(lines, transcript)
+
+    # --scratch-sessions relocate. The transcript is never touched; only the
+    # folder the entry names changes, from an app-internal scratch workspace
+    # that no longer exists to a real directory.
+    original_cwd = facts["cwd"]
+    if cwd_override:
+        facts["cwd"] = cwd_override
+        facts["originCwd"] = cwd_override
 
     if facts["_isSidechain"] and not allow_sidechain:
         die(
@@ -879,6 +960,7 @@ def import_one(
         "replacedEntryBackup": str(replaced_backup) if replaced_backup else None,
         "duplicateOf": replaces["sessionId"] if replaces else None,
         "duplicateVia": replaces["via"] if replaces else None,
+        "relocatedFrom": original_cwd if cwd_override else None,
     }
 
 
@@ -1028,6 +1110,21 @@ def main() -> None:
         help="permit importing a subagent sidechain (normally refused)",
     )
     ap.add_argument(
+        "--scratch-sessions",
+        choices=("import", "skip", "relocate"),
+        default="import",
+        help="what to do with sessions that ran in a desktop scratch workspace: "
+        "import them as they are (default), skip them, or relocate them by "
+        "pointing the entry at --scratch-dir instead of the app-internal path.",
+    )
+    ap.add_argument(
+        "--scratch-dir",
+        type=Path,
+        default=DEFAULT_SCRATCH_DIR,
+        help=f"with --scratch-sessions relocate, the folder to point at "
+        f"(default {DEFAULT_SCRATCH_DIR})",
+    )
+    ap.add_argument(
         "--exclude-rote-commands",
         action="store_true",
         help="skip sessions whose only user content is built-in slash commands "
@@ -1077,9 +1174,13 @@ def main() -> None:
                 mark = "-"
             elif row["isRote"]:
                 mark = "~"
+            elif row["isScratch"]:
+                mark = "s"
             else:
                 mark = " "
             note = f"   [{' '.join(row['commands'])}]" if row["isRote"] else ""
+            if row["isScratch"]:
+                note = "   [scratch workspace]"
             print(
                 f"{mark:2}{row['cliSessionId']:38} {row['turns']:>5} "
                 f"{row['subagents']:>6}  {row['title'][:44]}{note}"
@@ -1096,6 +1197,8 @@ def main() -> None:
             print("- no user content at all, always skipped")
         if any(r["isRote"] for r in shown):
             print("~ only built-in slash commands, skipped by --exclude-rote-commands")
+        if any(r["isScratch"] and not indexed.get(r["cliSessionId"]) for r in shown):
+            print("s ran in a desktop scratch workspace, see --scratch-sessions")
         return
 
     if not args.to:
@@ -1116,6 +1219,12 @@ def main() -> None:
     unknown_forced = forced - set(already)
     perms, perm_why = resolve_permissions()
 
+    # What any profile on this machine knows about sessions the app absorbed
+    # into a later one. Without this a fresh profile re-imports an absorbed
+    # session as its own conversation, because the lineage is only ever
+    # recorded in an index entry, never in a transcript.
+    lineage = lineage_map(all_session_scopes())
+
     remap = None
     if args.remap:
         if "=" not in args.remap:
@@ -1134,6 +1243,7 @@ def main() -> None:
     targets: list[Path] = []
     skipped: dict[str, dict] = {}
     contentless: list[dict] = []
+    overrides: dict[str, str | None] = {}
 
     def has_no_content(row: dict) -> str | None:
         """Why this session carries no record of work, or None if it does."""
@@ -1141,6 +1251,27 @@ def main() -> None:
             return "no user content at all"
         if row["isRote"] and args.exclude_rote_commands:
             return f"only built-in commands: {' '.join(row['commands'])}"
+        if row["isScratch"] and args.scratch_sessions == "skip":
+            return "ran in a desktop scratch workspace"
+        return None
+
+    def absorbed_here(cli_id: str, incoming: set[str]) -> dict | None:
+        """This session is an earlier segment of one the profile will have.
+
+        Only skip when the successor is actually present, or this run would
+        drop a conversation that nothing else accounts for.
+        """
+        got = lineage.get(cli_id)
+        if not got:
+            return None
+        successor = got["successor"]
+        if successor in already or successor in incoming:
+            return got
+        return None
+
+    def override_for(row: dict) -> str | None:
+        if row["isScratch"] and args.scratch_sessions == "relocate":
+            return str(args.scratch_dir.expanduser())
         return None
 
     if args.session:
@@ -1158,15 +1289,31 @@ def main() -> None:
                 skipped[args.session] = already[args.session]
             else:
                 targets = matches[:1]
+                if row:
+                    overrides[args.session] = override_for(row)
     elif args.limit:
         rows = [r for r in (summarize(f) for f in top_level_transcripts()) if r]
         rows.sort(key=lambda r: r["lastActivityAt"], reverse=True)
         skipped.update(
             {r["cliSessionId"]: already[r["cliSessionId"]] for r in rows if r["cliSessionId"] in already}
         )
+        # An absorbed session is skipped when its successor is already in the
+        # profile, or is itself in this run's candidates. Both are known before
+        # the limit is applied, so the decision does not depend on batch size.
+        candidates = {r["cliSessionId"] for r in rows if r["cliSessionId"] not in already}
         fresh = []
         for r in rows:
-            if r["cliSessionId"] in already:
+            cli_id = r["cliSessionId"]
+            if cli_id in already:
+                continue
+            merged = absorbed_here(cli_id, candidates)
+            if merged and cli_id not in forced:
+                skipped[cli_id] = {
+                    "entry": None,
+                    "sessionId": merged["successor"],
+                    "title": merged["title"],
+                    "via": "priorCliSessionIds",
+                }
                 continue
             why = has_no_content(r)
             if why:
@@ -1174,6 +1321,7 @@ def main() -> None:
             else:
                 fresh.append(r)
         targets = [r["path"] for r in fresh[: args.limit]]
+        overrides = {r["cliSessionId"]: override_for(r) for r in fresh[: args.limit]}
 
     for cli_id in args.overwrite:
         matches = [p for p in top_level_transcripts() if p.stem == cli_id]
@@ -1184,6 +1332,8 @@ def main() -> None:
             die(f"{cli_id} has nothing to import — no user content at all")
         if matches[0] not in targets:
             targets.append(matches[0])
+            if row:
+                overrides[cli_id] = override_for(row)
         skipped.pop(cli_id, None)
 
     if unknown_forced:
@@ -1256,6 +1406,7 @@ def main() -> None:
             args.rewrite_content,
             args.allow_sidechain,
             already.get(t.stem) if t.stem in forced else None,
+            overrides.get(t.stem),
         )
         (unfinished if got.get("skipped") else records).append(got)
 
