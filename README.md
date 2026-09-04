@@ -54,12 +54,50 @@ Surfaces sessions you ran in the `claude` CLI inside the desktop app.
 scripts/import-cli-session.py --to "$PROFILE" --list          # browse, * marks imported
 scripts/import-cli-session.py --to "$PROFILE" --session <id>  # one session
 scripts/import-cli-session.py --to "$PROFILE" --limit 5       # five most recent
+scripts/import-cli-session.py --to "$PROFILE" --overwrite <id># re-import one already present
 scripts/import-cli-session.py --undo <staging>                # reverse a run
 scripts/import-cli-session.py --undo <staging> --only <id>    # reverse one
 ```
 
 Quit the destination profile first. Every run refuses to write into a profile
 with a live Claude instance.
+
+`--list` marks each session with what the importer would do:
+
+| Mark | Meaning |
+| --- | --- |
+| `*` | already indexed in the target profile |
+| `+` | already there, absorbed into a later session as a prior CLI id |
+| `-` | no user content at all, always skipped |
+| `~` | only built-in slash commands, skipped by `--exclude-rote-commands` |
+
+### Sessions already in the profile
+
+A profile claims a CLI session two ways: an entry's `cliSessionId` is that
+session, and its `priorCliSessionIds` are earlier segments the app absorbed
+when a session was resumed or compacted into a new id. Both count, so neither
+is re-imported by default. A run lists what it skipped, with the `--overwrite`
+command for each.
+
+`--overwrite` replaces the existing entry when that entry is the same session.
+When a later session merely absorbed this one, it adds a second entry and
+leaves the newer conversation alone. `--undo` restores whatever was replaced.
+
+### Sessions that record no work
+
+Sessions with no user content are always skipped. `--exclude-rote-commands`
+additionally skips sessions whose only content is built-in commands that read
+state or change Claude's own settings, such as `/model`, `/clear`, `/usage`
+and `/exit`.
+
+The CLI writes one slash command as three user turns, so a session holding
+only `/exit` reports three turns and does not look empty by turn count. The
+command list is an allowlist, so a custom command, a plugin command, or a
+built-in added by a later release always counts as real content and keeps its
+session. Commands that write project files or change tool state, among them
+`/init`, `/rewind`, `/agents` and `/mcp`, are deliberately absent.
+
+Neither rule rewrites a transcript. A session is indexed whole or not at all.
 
 ## How session storage works
 

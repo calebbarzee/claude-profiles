@@ -78,6 +78,23 @@ at the end of a run with the --overwrite command for each.
 When a later session merely absorbed this one as a prior id, it adds a second
 entry instead and leaves the newer conversation alone, since removing it
 would delete a session that is not the one being imported.
+
+SESSIONS WITH NO CONTENT
+
+A session that records no work is not worth an entry. Two cases:
+
+  no user content at all   always skipped
+  only rote commands       skipped by --exclude-rote-commands
+
+The CLI writes one slash command as three user turns, a caveat preamble, the
+command, and its output, so a session holding only /exit still reports three
+turns and looks non-empty by turn count alone. ROTE_COMMANDS names the
+built-ins that only read state or change Claude's own settings, and it is an
+allowlist: a command that is not on it counts as real content, so custom
+commands, plugin commands and future built-ins keep their session by default.
+
+Nothing here rewrites a transcript. A session is either indexed whole or not
+indexed, so the flag cannot alter what a conversation says.
 """
 
 from __future__ import annotations
@@ -141,6 +158,108 @@ CONSERVATIVE = {
 }
 
 PERMISSION_FIELDS = tuple(CONSERVATIVE)
+
+# --------------------------------------------------------------------------
+# rote commands
+# --------------------------------------------------------------------------
+
+# Built-in commands that only read state, or change Claude's own settings and
+# conversation state. None of them touch project files, the working directory,
+# or anything outside Claude, so a session containing nothing but these carries
+# no record of work and --exclude-rote-commands skips it.
+#
+# This is an ALLOWLIST, and deliberately so. A command that is not named here
+# counts as real content, which means a custom command from .claude/commands,
+# a plugin command, or a built-in added by a future release all keep their
+# session without needing to be enumerated. Commands like /init, /rewind,
+# /agents and /mcp are absent on purpose: they write project files, restore
+# checkpoints, or change tool state.
+ROTE_COMMANDS = frozenset(
+    {
+        # read-only reports
+        "/help",
+        "/status",
+        "/usage",
+        "/cost",
+        "/context",
+        "/doctor",
+        "/release-notes",
+        # session and conversation state
+        "/clear",
+        "/compact",
+        "/exit",
+        "/quit",
+        "/resume",
+        # Claude-scoped settings
+        "/model",
+        "/theme",
+        "/vim",
+        "/output-style",
+        "/statusline",
+        "/privacy-settings",
+        "/rate-limit-options",
+        "/chrome",
+        "/login",
+        "/logout",
+    }
+)
+
+# The CLI records one slash command as a run of user turns: a caveat preamble,
+# the command itself, then its output. All three count toward completedTurns,
+# which is why a session holding only /exit reports three turns.
+COMMAND_NAME = re.compile(r"<command-name>\s*(/?[\w:.-]+)\s*</command-name>")
+COMMAND_SCAFFOLD = ("<local-command-caveat>", "<local-command-stdout>", "<local-command-stderr>")
+
+
+def message_text(message: object) -> str:
+    """The human-readable text of a turn, ignoring tool results and images.
+
+    A tool result arrives as a user turn with no text block. It is activity,
+    not something the user said, so it never counts as content on its own.
+    """
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
+def classify_content(raw: list[str], parse) -> tuple[int, list[str]]:
+    """Count real user turns, and list the slash commands that were run.
+
+    Returns (real_turns, commands). A turn is real unless it is command
+    scaffolding or an allowlisted command, so an unrecognised command counts
+    as real content.
+    """
+    real = 0
+    commands: list[str] = []
+    for line in raw:
+        if '"type":"user"' not in line:
+            continue
+        obj = parse(line)
+        if obj.get("type") != "user" or obj.get("isSidechain"):
+            continue
+        text = message_text(obj.get("message")).strip()
+        if not text:
+            continue
+        if any(marker in text for marker in COMMAND_SCAFFOLD):
+            continue
+        found = COMMAND_NAME.search(text)
+        if found:
+            name = found.group(1)
+            name = name if name.startswith("/") else "/" + name
+            commands.append(name)
+            if name in ROTE_COMMANDS:
+                continue
+        real += 1
+    return real, commands
 
 
 def die(msg: str) -> None:
@@ -287,6 +406,8 @@ def summarize(transcript: Path) -> dict | None:
             if cwd:
                 break
 
+    real, commands = classify_content(raw, parse)
+
     return {
         "cliSessionId": transcript.stem,
         "path": transcript,
@@ -296,6 +417,13 @@ def summarize(transcript: Path) -> dict | None:
         "lastActivityAt": max(stamps) if stamps else 0,
         "lines": len(raw),
         "subagents": len(list(subagent_dir_for(transcript).glob("*.jsonl"))),
+        "realTurns": real,
+        "commands": commands,
+        # Nothing the user ever said or ran. Imports as an empty conversation,
+        # so it is always skipped.
+        "isEmpty": real == 0 and not commands,
+        # Ran only allowlisted commands. Skipped under --exclude-rote-commands.
+        "isRote": real == 0 and bool(commands),
     }
 
 
@@ -463,6 +591,19 @@ def indexed_cli_map(scope: Path) -> dict[str, dict]:
                 "via": via,
             }
     return out
+
+
+def contentless_report(rows: list[dict]) -> None:
+    """List sessions left out because they record no work."""
+    if not rows:
+        return
+    print()
+    print(f"  {len(rows)} session{'s' if len(rows) != 1 else ''} carry no user content — not imported:")
+    print()
+    for row in sorted(rows, key=lambda r: r["title"]):
+        print(f"    {row['cliSessionId']}  {row['title'][:44]}")
+        print(f"      {row['why']}")
+    print()
 
 
 def duplicate_report(dupes: dict[str, dict], profile: Path) -> None:
@@ -887,6 +1028,13 @@ def main() -> None:
         help="permit importing a subagent sidechain (normally refused)",
     )
     ap.add_argument(
+        "--exclude-rote-commands",
+        action="store_true",
+        help="skip sessions whose only user content is built-in slash commands "
+        "that read state or change Claude's own settings. Sessions with no user "
+        "content at all are always skipped, with or without this flag.",
+    )
+    ap.add_argument(
         "--overwrite",
         action="append",
         default=[],
@@ -919,13 +1067,22 @@ def main() -> None:
                 indexed = indexed_cli_map(session_scope(args.to.expanduser().resolve()))
             except SystemExit:
                 indexed = {}
+        shown = rows[: args.limit or 20]
         print(f"{'':2}{'SESSION':38} {'TURNS':>5} {'AGENTS':>6}  TITLE")
-        for row in rows[: args.limit or 20]:
+        for row in shown:
             got = indexed.get(row["cliSessionId"])
-            mark = " " if not got else ("*" if got["via"] == "cliSessionId" else "+")
+            if got:
+                mark = "*" if got["via"] == "cliSessionId" else "+"
+            elif row["isEmpty"]:
+                mark = "-"
+            elif row["isRote"]:
+                mark = "~"
+            else:
+                mark = " "
+            note = f"   [{' '.join(row['commands'])}]" if row["isRote"] else ""
             print(
                 f"{mark:2}{row['cliSessionId']:38} {row['turns']:>5} "
-                f"{row['subagents']:>6}  {row['title'][:44]}"
+                f"{row['subagents']:>6}  {row['title'][:44]}{note}"
             )
         hidden = len(list(CLI_PROJECTS.glob(f"*/*/{SUBAGENT_DIR}/*.jsonl")))
         print(f"\n{len(rows)} sessions in {CLI_PROJECTS}")
@@ -935,6 +1092,10 @@ def main() -> None:
             print("* already indexed in the target profile")
         if any(v["via"] == "priorCliSessionIds" for v in indexed.values()):
             print("+ already in the profile, absorbed into a later session")
+        if any(r["isEmpty"] for r in shown):
+            print("- no user content at all, always skipped")
+        if any(r["isRote"] for r in shown):
+            print("~ only built-in slash commands, skipped by --exclude-rote-commands")
         return
 
     if not args.to:
@@ -972,6 +1133,15 @@ def main() -> None:
     # that were skipped are reported afterwards with the command to force each.
     targets: list[Path] = []
     skipped: dict[str, dict] = {}
+    contentless: list[dict] = []
+
+    def has_no_content(row: dict) -> str | None:
+        """Why this session carries no record of work, or None if it does."""
+        if row["isEmpty"]:
+            return "no user content at all"
+        if row["isRote"] and args.exclude_rote_commands:
+            return f"only built-in commands: {' '.join(row['commands'])}"
+        return None
 
     if args.session:
         if args.session.endswith(".jsonl"):
@@ -980,6 +1150,10 @@ def main() -> None:
             matches = [p for p in top_level_transcripts() if p.stem == args.session]
             if not matches:
                 die(f"no session {args.session}. Use --list to browse.")
+            row = summarize(matches[0])
+            why = has_no_content(row) if row else None
+            if why:
+                die(f"{args.session} has nothing to import — {why}")
             if args.session in already and args.session not in forced:
                 skipped[args.session] = already[args.session]
             else:
@@ -990,13 +1164,24 @@ def main() -> None:
         skipped.update(
             {r["cliSessionId"]: already[r["cliSessionId"]] for r in rows if r["cliSessionId"] in already}
         )
-        fresh = [r for r in rows if r["cliSessionId"] not in already]
+        fresh = []
+        for r in rows:
+            if r["cliSessionId"] in already:
+                continue
+            why = has_no_content(r)
+            if why:
+                contentless.append({**r, "why": why})
+            else:
+                fresh.append(r)
         targets = [r["path"] for r in fresh[: args.limit]]
 
     for cli_id in args.overwrite:
         matches = [p for p in top_level_transcripts() if p.stem == cli_id]
         if not matches:
             die(f"no session {cli_id}. Use --list to browse.")
+        row = summarize(matches[0])
+        if row and row["isEmpty"]:
+            die(f"{cli_id} has nothing to import — no user content at all")
         if matches[0] not in targets:
             targets.append(matches[0])
         skipped.pop(cli_id, None)
@@ -1013,6 +1198,7 @@ def main() -> None:
             duplicate_report(skipped, profile)
         else:
             print("Nothing to import — every session is already indexed.")
+        contentless_report(contentless)
         return
 
     # ---- report ----------------------------------------------------------
@@ -1047,6 +1233,7 @@ def main() -> None:
                 print(f"      OVERWRITE adds a second entry; {existing['sessionId']} kept")
 
     duplicate_report(skipped, profile)
+    contentless_report(contentless)
 
     if args.dry_run:
         print("\nDry run — nothing written.")
