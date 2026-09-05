@@ -146,6 +146,13 @@ NEUTRAL: dict[str, object] = {
     "spawnSeed": {},
     "isArchived": False,
     "lastSpawnRootDetected": False,
+    # A per-session cache of the remote MCP servers available when the entry
+    # was written, around 90 KB each once a connector with many tools is
+    # attached. It does not follow a later disconnect, so a copied one carries
+    # a connector the account no longer has. The live list is account-side;
+    # a session opened with this empty behaved normally, so an empty cache is
+    # the honest starting value for a session that was never run here.
+    "remoteMcpServersConfig": [],
 }
 
 # Stale run state. These record something that happened to the TEMPLATE
@@ -827,6 +834,7 @@ def import_one(
     allow_sidechain: bool,
     replaces: dict | None = None,
     cwd_override: str | None = None,
+    allow_live: bool = False,
 ) -> dict:
     digest = sha256(transcript)
     lines = read_lines(transcript)
@@ -861,7 +869,8 @@ def import_one(
     # here would abandon the entries already written by earlier sessions in
     # this batch, before manifest.json exists for --undo to read. Skip it and
     # let the caller report it instead.
-    if sha256(transcript) != digest:
+    live = sha256(transcript) != digest
+    if live and not allow_live:
         return {
             "skipped": "transcript changed while being staged — that session is still running",
             "title": facts["title"],
@@ -927,7 +936,8 @@ def import_one(
 
     # Same race, caught after the write. Roll this one session back rather than
     # aborting a batch whose manifest does not exist yet.
-    if sha256(transcript) != digest:
+    ended_live = sha256(transcript) != digest
+    if ended_live and not allow_live:
         dest.unlink(missing_ok=True)
         if replaced_backup and replaced_path:
             shutil.copy2(replaced_backup, replaced_path)
@@ -961,6 +971,10 @@ def import_one(
         "duplicateOf": replaces["sessionId"] if replaces else None,
         "duplicateVia": replaces["via"] if replaces else None,
         "relocatedFrom": original_cwd if cwd_override else None,
+        # The transcript grew while it was being staged, so its hash is a
+        # moving target and the end-of-run check cannot assert on it. The app
+        # reads the file itself, so later turns appear regardless.
+        "wasLive": bool(live or ended_live),
     }
 
 
@@ -1108,6 +1122,13 @@ def main() -> None:
         "--allow-sidechain",
         action="store_true",
         help="permit importing a subagent sidechain (normally refused)",
+    )
+    ap.add_argument(
+        "--allow-live",
+        action="store_true",
+        help="import a session whose transcript is still being written, instead "
+        "of skipping it. The entry describes the transcript as it was when "
+        "staged; the app reads the file fresh, so later turns still appear.",
     )
     ap.add_argument(
         "--scratch-sessions",
@@ -1407,6 +1428,7 @@ def main() -> None:
             args.allow_sidechain,
             already.get(t.stem) if t.stem in forced else None,
             overrides.get(t.stem),
+            args.allow_live,
         )
         (unfinished if got.get("skipped") else records).append(got)
 
@@ -1441,9 +1463,14 @@ def main() -> None:
 
     print("Validating:")
     ok = True
+    live_count = 0
     for rec in records:
         original = Path(rec["originalTranscript"])
-        if sha256(original) != rec["originalSha256"]:
+        if rec.get("wasLive"):
+            # Imported under --allow-live. Its hash was always going to move,
+            # so a mismatch here is expected rather than a modification.
+            live_count += 1
+        elif sha256(original) != rec["originalSha256"]:
             print(f"  FAIL original modified: {original.name}")
             ok = False
         entry = Path(rec["indexEntry"])
@@ -1477,6 +1504,8 @@ def main() -> None:
     if ok:
         note = "originals unchanged, index entries valid, transcripts resolvable, cwd consistent"
         print(f"  ok  {len(records)} {note}")
+        if live_count:
+            print(f"      {live_count} still running, hash not asserted (--allow-live)")
     print()
     print(f"Manifest: {staging / MANIFEST_NAME}")
     print("Undo everything:")
