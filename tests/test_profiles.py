@@ -8,7 +8,14 @@ from conftest import make_transcript, template_entry
 from claude_profiles.cli import main
 from claude_profiles.commands import profiles as cmd
 from claude_profiles.commands.profiles import launch as real_launch
-from claude_profiles.paths import desktop_entries_dir, load_registry, profiles_root
+from claude_profiles.paths import (
+    Profile,
+    desktop_entries_dir,
+    load_registry,
+    profiles_root,
+    registry_path,
+    save_registry,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -152,3 +159,28 @@ def test_a_registered_profile_can_be_named_instead_of_a_path(capsys):
 
     assert run("import", "--to", "work", "--session", path.stem) == 0
     assert "originals unchanged" in capsys.readouterr().out
+
+
+def test_add_refuses_to_replace_a_corrupt_registry(capsys):
+    registry_path().parent.mkdir(parents=True, exist_ok=True)
+    registry_path().write_text("{not json")
+    assert run("profile", "add", "Work", "--no-open") == 1
+    assert "profile folders are intact" in capsys.readouterr().err
+    assert registry_path().read_text() == "{not json"
+
+
+def test_rm_purge_refuses_a_data_dir_outside_the_profiles_root(tmp_path, capsys):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "keep").write_text("x")
+    save_registry(
+        [
+            Profile("stray", "Stray", str(outside), 0),
+            Profile("root", "Root", str(profiles_root()), 0),
+        ]
+    )
+    for profile_id in ("stray", "root"):
+        assert run("profile", "rm", profile_id, "--purge") == 1
+        assert "outside" in capsys.readouterr().err
+    assert [p.id for p in load_registry()] == ["stray", "root"]
+    assert (outside / "keep").is_file()

@@ -14,6 +14,8 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from . import Abort
+
 REGISTRY_NAME = "profiles.json"
 REGISTRY_VERSION = 1
 
@@ -101,15 +103,24 @@ def registry_path() -> Path:
 
 
 def load_registry() -> list[Profile]:
+    """a missing registry is empty; one that cannot be trusted aborts before anything writes."""
+    path = registry_path()
+    intact = "profile folders are intact; fix or remove the file"
     try:
-        data = json.loads(registry_path().read_text())
-    except (OSError, ValueError):
+        text = path.read_text()
+    except FileNotFoundError:
         return []
+    except OSError as exc:
+        raise Abort(f"cannot read {path}: {exc}. {intact}") from exc
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise Abort(f"{path} is not valid JSON ({exc}). {intact}") from exc
     rows = data.get("profiles") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        return []
+        raise Abort(f'{path} has no "profiles" list. {intact}')
     out = []
-    for row in rows:
+    for n, row in enumerate(rows, 1):
         try:
             out.append(
                 Profile(
@@ -119,8 +130,8 @@ def load_registry() -> list[Profile]:
                     createdAt=int(row.get("createdAt", 0)),
                 )
             )
-        except (KeyError, TypeError, ValueError):
-            continue
+        except (KeyError, TypeError, ValueError) as exc:
+            raise Abort(f"{path} row {n} lacks an id, name or dataDir. {intact}") from exc
     return out
 
 

@@ -151,6 +151,12 @@ def run_open(args: argparse.Namespace) -> int:
 
 def run_remove(args: argparse.Namespace) -> int:
     profile = _find(args.id)
+    if args.purge:
+        root, data = profiles_root().resolve(), profile.path.resolve()
+        if data == root or root not in data.parents:
+            raise Abort(
+                f"{profile.dataDir} is outside {profiles_root()}; delete it by hand if you mean to"
+            )
     save_registry([p for p in load_registry() if p.id != profile.id])
     desktop_entry_path(profile.id).unlink(missing_ok=True)
     badge_path(profile.id).unlink(missing_ok=True)

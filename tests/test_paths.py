@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from claude_profiles import paths
+import pytest
+
+from claude_profiles import Abort, paths
 from claude_profiles.paths import Profile
 
 
@@ -20,19 +22,26 @@ def test_registry_round_trip():
     assert paths.load_registry() == rows
 
 
-def test_registry_survives_a_corrupt_file():
-    paths.registry_path().parent.mkdir(parents=True, exist_ok=True)
-    paths.registry_path().write_text("{not json")
+def test_a_missing_registry_is_empty():
     assert paths.load_registry() == []
 
 
-def test_registry_drops_malformed_rows_and_keeps_the_rest():
+def test_a_corrupt_registry_aborts_and_is_left_alone():
+    paths.registry_path().parent.mkdir(parents=True, exist_ok=True)
+    paths.registry_path().write_text("{not json")
+    with pytest.raises(Abort, match="not valid JSON"):
+        paths.load_registry()
+    assert paths.registry_path().read_text() == "{not json"
+
+
+def test_a_row_missing_a_field_aborts_instead_of_vanishing_on_save():
     paths.registry_path().parent.mkdir(parents=True, exist_ok=True)
     paths.registry_path().write_text(
         '{"version": 1, "profiles": [{"id": "a"}, '
         '{"id": "b", "name": "B", "dataDir": "/d", "createdAt": 5}]}'
     )
-    assert [p.id for p in paths.load_registry()] == ["b"]
+    with pytest.raises(Abort, match="row 1 lacks"):
+        paths.load_registry()
 
 
 def test_resolve_profile_accepts_an_id_a_name_or_a_path(tmp_path):
