@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
 #
-# permission-audit.sh — show where permission settings actually live, and
-# recover the valid enum values from the app bundle.
+# permission-audit.sh — where permission settings live, and which enum values
+# the app bundle actually admits. macOS only.
 #
 # WHAT THIS ESTABLISHED
 #
-#   permissionMode        has a real global home:
+#   permissionMode        has a global home:
 #                         ~/.claude/settings.json -> permissions.defaultMode
+#   chromePermissionMode  has none anywhere on disk. It exists only inside each
+#                         session's index entry, so a generated session has
+#                         nothing to inherit and takes a conservative default.
 #
-#   chromePermissionMode  has NO global setting anywhere on disk. It exists
-#                         only baked into each session's index entry, so a
-#                         generated session has nothing to inherit from and
-#                         must take a conservative default instead.
-#
-# Attested enum values, recovered from app.asar rather than guessed:
+# Enum values recovered from app.asar rather than guessed:
 #
 #   chromePermissionMode  skip_all_permission_checks | always_ask
-#   permissionMode        ask | default | acceptEdits   (assigned)
+#   permissionMode        ask | default | acceptEdits           (assigned)
 #                         auto | plan | bypassPermissions | dontAsk (literals)
 #
-# import-cli-session.py uses "ask" and "always_ask" as its conservative
-# fallbacks on the strength of this. Re-run after a Claude Desktop update to
-# confirm those values still exist before trusting them.
+# `claude-profiles import` falls back to "ask" and "always_ask" on the strength
+# of this. Re-run after a Claude Desktop update before trusting a large import.
 #
 set -euo pipefail
 

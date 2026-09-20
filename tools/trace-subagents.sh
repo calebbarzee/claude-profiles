@@ -1,28 +1,25 @@
 #!/usr/bin/env bash
 #
-# trace-subagents.sh — show how a CLI transcript links to its subagent
-# sidechains, and prove that sidechains never get their own desktop index
-# entry.
+# trace-subagents.sh — how a transcript links to its subagent sidechains, and
+# why a sidechain never gets its own index entry. macOS only.
 #
 # WHAT THIS ESTABLISHED
 #
-# The CLI transcript store nests subagent work one level down:
+# The transcript store nests subagent work one level down:
 #
 #   <slug>/<sessionId>.jsonl                         a real session
 #   <slug>/<sessionId>/subagents/agent-<hash>.jsonl  a subagent sidechain
 #
 # A sidechain carries the PARENT's sessionId on every line, plus its own
-# agentId matching its filename, isSidechain true throughout, and
-# sessionKind "bg". Parent and sidechain are joined by a shared promptId:
-# the parent's user turn and the whole sidechain share one promptId value.
+# agentId matching its filename, isSidechain true throughout, and sessionKind
+# "bg". A shared promptId joins the parent's user turn to the whole sidechain.
 #
-# The desktop app therefore renders subagent work INLINE inside the parent
-# turn, and gives sidechains no index entry of their own. That is why
-# import-cli-session.py refuses to import one as a standalone session and,
-# when --remap republishes a parent, republishes the subagents directory
-# alongside it.
+# The app therefore renders subagent work inline inside the parent turn and
+# gives sidechains no index entry. That is why `claude-profiles import` refuses
+# to import one, and why --remap republishes the subagents directory alongside
+# a parent.
 #
-# Re-run this after a Claude Desktop update to check the layout still holds.
+# Re-run after a Claude Desktop update to check the layout still holds.
 #
 set -euo pipefail
 

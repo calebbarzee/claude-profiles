@@ -1,13 +1,12 @@
-import { LocalStorage } from "@raycast/api";
 import { execFile } from "child_process";
-import { mkdir, rm } from "fs/promises";
+import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { homedir } from "os";
-import { join } from "path";
+import { dirname, join } from "path";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
-/** Where each isolated Claude profile's Electron `--user-data-dir` lives. */
+/** Where each profile's Electron `--user-data-dir` lives. */
 export const PROFILES_ROOT = join(
   homedir(),
   "Library",
@@ -15,7 +14,9 @@ export const PROFILES_ROOT = join(
   "Claude Profiles",
 );
 
-const STORAGE_KEY = "claude-profiles";
+/** Shared with the `claude-profiles` CLI, which reads and writes the same file. */
+const REGISTRY = join(PROFILES_ROOT, "profiles.json");
+const REGISTRY_VERSION = 1;
 
 export interface ClaudeProfile {
   id: string;
@@ -24,47 +25,44 @@ export interface ClaudeProfile {
   createdAt: number;
 }
 
-/** Turn a display name into a filesystem-safe folder slug. */
-function slugify(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "profile";
-}
-
-function uniqueSlug(name: string, existing: ClaudeProfile[]): string {
-  const base = slugify(name);
-  let slug = base;
-  let i = 2;
-  while (existing.some((p) => p.id === slug)) {
-    slug = `${base}-${i++}`;
-  }
-  return slug;
-}
-
 export async function getProfiles(): Promise<ClaudeProfile[]> {
-  const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
-  if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as ClaudeProfile[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(await readFile(REGISTRY, "utf8"));
+    return Array.isArray(parsed?.profiles) ? parsed.profiles : [];
   } catch {
     return [];
   }
 }
 
 async function saveProfiles(profiles: ClaudeProfile[]): Promise<void> {
-  await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+  await mkdir(dirname(REGISTRY), { recursive: true });
+  const body = JSON.stringify({ version: REGISTRY_VERSION, profiles }, null, 2);
+  await writeFile(REGISTRY, `${body}\n`);
 }
 
-/** Creates a fresh, empty data directory and registers it as a profile. */
+function slugify(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "profile"
+  );
+}
+
+function uniqueSlug(name: string, existing: ClaudeProfile[]): string {
+  const base = slugify(name);
+  let slug = base;
+  let n = 2;
+  while (existing.some((p) => p.id === slug)) slug = `${base}-${n++}`;
+  return slug;
+}
+
+/** Creates an empty data directory and registers it. */
 export async function addProfile(name: string): Promise<ClaudeProfile> {
   const trimmed = name.trim();
-  if (!trimmed) {
-    throw new Error("Profile name can't be empty");
-  }
+  if (!trimmed) throw new Error("Profile name can't be empty");
+
   const profiles = await getProfiles();
   const id = uniqueSlug(trimmed, profiles);
   const dataDir = join(PROFILES_ROOT, id);
@@ -80,7 +78,7 @@ export async function addProfile(name: string): Promise<ClaudeProfile> {
   return profile;
 }
 
-/** Removes a profile from the list. Optionally deletes its saved login/chat data too. */
+/** Unregisters a profile, and optionally deletes its login and chats. */
 export async function removeProfile(
   id: string,
   deleteData: boolean,
@@ -88,16 +86,15 @@ export async function removeProfile(
   const profiles = await getProfiles();
   const target = profiles.find((p) => p.id === id);
   await saveProfiles(profiles.filter((p) => p.id !== id));
-  if (target && deleteData) {
+  if (target && deleteData)
     await rm(target.dataDir, { recursive: true, force: true });
-  }
 }
 
 /**
- * Launches a brand-new Claude Desktop instance pointed at the given data dir.
- * `-n` forces a new process even if Claude is already running under another
- * profile; `--user-data-dir` is the Electron flag that relocates all of the
- * app's persistent state (auth, chats, settings) to that folder.
+ * Starts a new Claude Desktop instance against this data directory. `-n`
+ * forces a new process even when Claude is already running under another
+ * profile; `--user-data-dir` is the Electron flag that relocates auth, chats
+ * and settings to that folder.
  */
 export async function launchClaudeProfile(dataDir: string): Promise<void> {
   await execFileAsync("open", [

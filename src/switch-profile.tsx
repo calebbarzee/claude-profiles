@@ -55,7 +55,7 @@ export default function SwitchProfile() {
     const confirmed = await confirmAlert({
       title: `Remove "${profile.name}" from the list?`,
       message:
-        "Its saved login and chats stay on disk — you can re-add it later by pointing a new profile at the same folder.",
+        "Its login and chats stay on disk. Re-add it later with `claude-profiles profile add`.",
       primaryAction: { title: "Remove", style: Alert.ActionStyle.Destructive },
     });
     if (!confirmed) return;

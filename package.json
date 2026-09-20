@@ -4,15 +4,18 @@
   "title": "Claude Profiles",
   "description": "Switch between isolated Claude Desktop accounts without logging out",
   "icon": "icon.png",
-  "author": "you",
-  "categories": ["Productivity", "Developer Tools"],
+  "author": "calebbarzee",
+  "categories": [
+    "Productivity",
+    "Developer Tools"
+  ],
   "license": "MIT",
   "commands": [
     {
       "name": "switch-profile",
       "title": "Claude Swap Profile",
       "subtitle": "Claude Profiles",
-      "description": "List your saved Claude Desktop profiles and open one",
+      "description": "List your Claude Desktop profiles and open one",
       "mode": "view"
     },
     {

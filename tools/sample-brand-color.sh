@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 #
-# sample-brand-color.sh — report the most common opaque non-white colors in
-# an app icon.
+# sample-brand-color.sh — the most common opaque non-white colors in an app
+# icon. This is where the extension's #D97757 fill comes from, rather than a
+# guessed brand hex. Re-run if the app icon is restyled.
 #
-# Used to derive the extension's #D97757 fill from Claude Desktop's own icon
-# rather than guessing at a brand hex. Re-run if the app icon is restyled.
-#
-# The PNG decoder is stdlib-only (struct + zlib), so this needs no Pillow or
-# ImageMagick. On Linux, pass a PNG directly; the sips step is macOS-only and
-# exists just to rasterise an .icns.
+# The PNG decoder is stdlib-only, so no Pillow or ImageMagick. On Linux pass a
+# PNG directly; the sips step only rasterises an .icns and is macOS-only.
 #
 set -euo pipefail
 
