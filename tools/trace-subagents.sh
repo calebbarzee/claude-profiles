@@ -34,7 +34,10 @@ if [ -z "$PARENT" ]; then
   )"
 fi
 
-[ -n "$PARENT" ] && [ -f "$PARENT" ] || { echo "no transcript with sidechains found" >&2; exit 1; }
+if [ -z "$PARENT" ] || [ ! -f "$PARENT" ]; then
+  echo "no transcript with sidechains found" >&2
+  exit 1
+fi
 
 AGENTS="${PARENT%.jsonl}/subagents"
 
