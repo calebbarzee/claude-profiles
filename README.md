@@ -105,6 +105,12 @@ time with `--only`.
 - resets every per-session permission grant, so approvals given to one session
   never ride along to another
 
+The profile registry is shared with the Raycast extension, and both treat it
+the same way: a missing `profiles.json` is an empty list, and one that is
+unreadable, malformed, or missing a field on any row stops the command before
+anything is written. `profile rm --purge` deletes a data directory only when it
+sits inside the profiles root; anything else is left for you to remove by hand.
+
 ## Reference
 
 - [Session storage](docs/session-storage.md) — the two locations, project slugs,
