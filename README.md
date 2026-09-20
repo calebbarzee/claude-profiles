@@ -130,6 +130,12 @@ The Raycast extension lives in `raycast/`:
 cd raycast && npm install && npm run dev
 ```
 
+Run the extension's library tests:
+
+```bash
+cd raycast && npm test
+```
+
 `tools/` holds forensic scripts that document undocumented formats. Re-running
 one after a Claude Desktop update tells you whether its finding still holds.
 They are macOS-only.
