@@ -1,9 +1,4 @@
-"""create, list, launch and forget isolated profiles.
-
-each profile is an Electron ``--user-data-dir`` with its own login, chats and
-settings. the registry is a JSON file the Raycast extension also reads and
-writes. on Linux each profile also gets an XDG ``.desktop`` launcher.
-"""
+"""create, list, launch and forget isolated profiles. see README.md and docs/linux.md."""
 
 from __future__ import annotations
 

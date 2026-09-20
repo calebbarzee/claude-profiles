@@ -67,8 +67,7 @@ def survey(scope: Path, generated: set[str], include_app: bool) -> list[dict[str
 
 
 def run_optimize(args: argparse.Namespace) -> int:
-    wants = (args.clear_errors, args.clear_connectors, bool(args.relocate_scratch))
-    if not any(wants):
+    if not (args.clear_errors or args.clear_connectors or args.relocate_scratch):
         raise Abort("pick at least one of --clear-errors, --clear-connectors, --relocate-scratch")
 
     profile = resolve_profile(args.to)
@@ -128,31 +127,18 @@ def run_optimize(args: argparse.Namespace) -> int:
         backup = run / "original" / path.name
         shutil.copy2(path, backup)
 
-        changed = []
         if "errors" in actions:
-            changed += [k for k in STALE_RUN_STATE if entry.pop(k, None) is not None]
+            for key in STALE_RUN_STATE:
+                entry.pop(key, None)
         if "connectors" in actions:
             entry[CONNECTOR_FIELD] = list(NEUTRAL[CONNECTOR_FIELD])
-            changed.append(CONNECTOR_FIELD)
-        moved_from = None
         if "scratch" in actions:
-            moved_from = entry.get("cwd")
             target = str(args.relocate_scratch.expanduser())
             entry = retarget_cwd(entry, target)
             entry["cwd"] = entry["originCwd"] = target
-            changed += ["cwd", "originCwd"]
 
         path.write_text(json.dumps(entry))
-        records.append(
-            {
-                "indexEntry": str(path),
-                "backup": str(backup),
-                "title": row["title"],
-                "actions": sorted(actions),
-                "changedFields": changed,
-                "movedFrom": moved_from,
-            }
-        )
+        records.append({"indexEntry": str(path), "backup": str(backup), "title": row["title"]})
 
     write_manifest(run, "optimize", profile, records, scope=str(scope))
 

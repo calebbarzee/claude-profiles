@@ -1,7 +1,4 @@
-"""The shared Claude Code transcript store at ``~/.claude/projects``.
-
-See docs/session-storage.md.
-"""
+"""the shared transcript store at ``~/.claude/projects``. see docs/session-storage.md."""
 
 from __future__ import annotations
 
@@ -9,7 +6,6 @@ import datetime as dt
 import json
 import re
 from collections import Counter
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +14,6 @@ from .paths import cli_projects
 
 SUBAGENT_DIR = "subagents"
 
-# allowlist on purpose, so an unnamed command counts as real content. /init,
-# /rewind, /agents and /mcp are excluded, they write files or change state.
 ROTE_COMMANDS = frozenset(
     {
         "/help", "/status", "/usage", "/cost", "/context", "/doctor", "/release-notes",
@@ -29,14 +23,12 @@ ROTE_COMMANDS = frozenset(
     }
 )  # fmt: skip
 
-# one slash command becomes three user turns (caveat, command, output), so a
-# session holding only /exit reports three turns, not one.
 COMMAND_NAME = re.compile(r"<command-name>\s*(/?[\w:.-]+)\s*</command-name>")
 COMMAND_SCAFFOLD = ("<local-command-caveat>", "<local-command-stdout>", "<local-command-stderr>")
 
 
 def slug_for(path: str) -> str:
-    """Encode a path the way the CLI names project folders."""
+    """encode a path the way the CLI names project folders."""
     return re.sub(r"[/_.]", "-", path)
 
 
@@ -49,7 +41,7 @@ def to_millis(stamp: str) -> int | None:
 
 
 def top_level_transcripts() -> list[Path]:
-    """Every real session transcript, excluding subagent sidechains."""
+    """every real session transcript, excluding subagent sidechains."""
     return sorted(p for p in cli_projects().glob("*/*.jsonl") if p.is_file())
 
 
@@ -87,7 +79,7 @@ def parse_line(line: str) -> dict[str, Any]:
 
 
 def message_text(message: Any) -> str:
-    """What a turn says, ignoring tool results and images."""
+    """what a turn says, ignoring tool results and images."""
     if not isinstance(message, dict):
         return ""
     content = message.get("content")
@@ -102,10 +94,8 @@ def message_text(message: Any) -> str:
     return ""
 
 
-def classify_content(
-    raw: list[str], parse: Callable[[str], dict[str, Any]]
-) -> tuple[int, int, list[str]]:
-    """Count user turns, count the real ones, and name the commands that ran."""
+def classify_content(raw: list[str]) -> tuple[int, int, list[str]]:
+    """count user turns, count the real ones, and name the commands that ran."""
     turns = 0
     real = 0
     commands: list[str] = []
@@ -113,7 +103,7 @@ def classify_content(
         # cheap substring prefilter, loose by design; the parsed type decides.
         if '"user"' not in line:
             continue
-        obj = parse(line)
+        obj = parse_line(line)
         if obj.get("type") != "user":
             continue
         turns += 1
@@ -134,7 +124,7 @@ def classify_content(
 
 
 def summarize(transcript: Path) -> dict[str, Any] | None:
-    """Cheap metadata for listing and selection."""
+    """cheap metadata for listing and selection."""
     try:
         raw = [ln for ln in transcript.read_text(errors="replace").splitlines() if ln.strip()]
     except OSError:
@@ -162,7 +152,7 @@ def summarize(transcript: Path) -> dict[str, Any] | None:
         if '"cwd"' in line and (cwd := parse_line(line).get("cwd")):
             break
 
-    turns, real, commands = classify_content(raw, parse_line)
+    turns, real, commands = classify_content(raw)
     return {
         "cliSessionId": transcript.stem,
         "path": transcript,
@@ -179,7 +169,7 @@ def summarize(transcript: Path) -> dict[str, Any] | None:
 
 
 def derive(lines: list[dict[str, Any]], transcript: Path) -> dict[str, Any]:
-    """Everything an index entry needs, read out of the transcript itself."""
+    """everything an index entry needs, read out of the transcript itself."""
     stamps = sorted(
         millis
         for line in lines
@@ -199,12 +189,9 @@ def derive(lines: list[dict[str, Any]], transcript: Path) -> dict[str, Any]:
     )
     efforts = Counter(d["effort"] for d in lines if isinstance(d.get("effort"), str))
 
-    # origin first: the most common cwd would favor a subdirectory the run
-    # stepped into over the session's own launch directory.
     launch = origin or (cwds.most_common(1)[0][0] if cwds else str(Path.home()))
 
-    # filename is authoritative: a sidechain carries its parent's sessionId on
-    # every line, so the in-file value would let it masquerade as the parent.
+    # the filename, not the in-file sessionId: a sidechain carries its parent's id.
     return {
         "cliSessionId": transcript.stem,
         "isSidechain": SUBAGENT_DIR in transcript.parts

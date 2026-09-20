@@ -7,6 +7,7 @@ from conftest import make_transcript, template_entry
 
 from claude_profiles.cli import main
 from claude_profiles.commands import profiles as cmd
+from claude_profiles.commands.profiles import launch as real_launch
 from claude_profiles.paths import desktop_entries_dir, load_registry, profiles_root
 
 
@@ -129,6 +130,14 @@ def test_linux_launchers_cycle_through_the_palette(linux):
         cmd.badge_path(p.id).read_text().split('fill="')[1].split('"')[0] for p in load_registry()
     }
     assert len(colors) == 2
+
+
+def test_linux_open_aborts_when_claude_desktop_is_missing(linux, monkeypatch, capsys):
+    run("profile", "add", "Work", "--no-open")
+    monkeypatch.setattr(cmd, "launch", real_launch)
+    monkeypatch.setattr(cmd.shutil, "which", lambda _name: None)
+    assert run("profile", "open", "work") == 1
+    assert "claude-desktop is not on PATH" in capsys.readouterr().err
 
 
 def test_a_registered_profile_can_be_named_instead_of_a_path(capsys):

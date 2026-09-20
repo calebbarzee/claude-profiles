@@ -243,8 +243,6 @@ def _republish(
     target_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(staged, published)
 
-    # sidechains must be republished with the parent, or the inline subagent
-    # blocks in the migrated session render empty.
     published_agents = None
     source_agents = subagent_dir_for(transcript)
     if source_agents.is_dir():
@@ -288,7 +286,6 @@ def import_one(
             "  inside the parent. Pass --allow-sidechain to force."
         )
 
-    original_cwd = facts["cwd"]
     if cwd_override:
         facts["cwd"] = facts["originCwd"] = cwd_override
 
@@ -299,7 +296,7 @@ def import_one(
         published_id = copy["id"]
         facts["cwd"] = facts["originCwd"] = copy["cwd"]
 
-    entry, tally = build_entry(template, facts, published_id, perms)
+    entry = build_entry(template, facts, published_id, perms)
     dest = scope / f"{entry['sessionId']}.json"
     if dest.exists():
         raise Abort(f"refusing to overwrite {dest}")
@@ -319,7 +316,8 @@ def import_one(
     dest.write_text(json.dumps(entry))
 
     # roll back rather than abort a batch whose manifest does not exist yet.
-    if sha256(transcript) != digest and not args.allow_live:
+    changed = sha256(transcript) != digest
+    if changed and not args.allow_live:
         dest.unlink(missing_ok=True)
         if backup and replaced:
             shutil.copy2(backup, replaced)
@@ -344,11 +342,9 @@ def import_one(
         "subagentCount": subagent_count(transcript),
         "remap": f"{remap[0]}={remap[1]}" if remap else None,
         "pathRewrites": copy["hits"] if copy else 0,
-        "fieldTally": dict(tally),
         "replacedEntryPath": str(replaced) if replaced else None,
         "replacedEntryBackup": str(backup) if backup else None,
-        "relocatedFrom": original_cwd if cwd_override else None,
-        "wasLive": args.allow_live and sha256(transcript) != digest,
+        "wasLive": args.allow_live and changed,
     }
 
 

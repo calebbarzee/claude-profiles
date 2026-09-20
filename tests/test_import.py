@@ -1,20 +1,25 @@
 from __future__ import annotations
 
+import itertools
 import json
 
 import pytest
 from conftest import (
     command_transcript,
+    dump,
     make_profile,
     make_transcript,
     read_entries,
     template_entry,
+    user_turn,
 )
 
+from claude_profiles import paths
 from claude_profiles.cli import main
+from claude_profiles.commands import importer
 from claude_profiles.index import walk_cwds
-from claude_profiles.staging import runs
-from claude_profiles.transcripts import find_transcript
+from claude_profiles.staging import read_manifest, runs, sha256
+from claude_profiles.transcripts import SUBAGENT_DIR, find_transcript, slug_for
 
 
 @pytest.fixture
@@ -135,12 +140,6 @@ def test_an_absorbed_session_is_kept_when_nothing_accounts_for_it(profile):
     )
 
 
-def test_a_sidechain_is_refused(profile, capsys):
-    parent = make_transcript(subagents=1)
-    side = next((parent.parent / parent.stem / "subagents").glob("*.jsonl"))
-    fails(capsys, "sidechain", "import", "--to", str(profile), "--session", str(side))
-
-
 def test_a_session_with_no_user_content_is_refused(profile, capsys):
     path = make_transcript(title="Only tooling")
     path.write_text(
@@ -259,3 +258,183 @@ def test_rewrite_content_alone_is_rejected(profile, capsys):
 def test_remap_needs_both_sides(profile, capsys):
     make_transcript()
     fails(capsys, "OLD=NEW", "import", "--to", str(profile), "--limit", "1", "--remap", "/only-one")
+
+
+def test_list_marks_scratch_sessions(capsys):
+    root = "/Users/x/Library/Application Support/Claude/scratch-workspaces"
+    make_transcript(cwd=f"{root}/acct/org/scratch-2026-01-01-abc123", title="Scratch chat")
+    assert run("list") == 0
+    assert "[scratch workspace]" in capsys.readouterr().out
+
+
+def test_import_reports_various_refusals(profile, tmp_path, monkeypatch, capsys):
+    fails(capsys, "no session", "import", "--to", str(profile), "--session", "not-a-real-id")
+    fails(capsys, "no session", "import", "--to", str(profile), "--overwrite", "not-a-real-id")
+
+    empty = make_transcript(title="Empty")
+    empty.write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "cwd": "/w",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "message": {"content": [{"type": "tool_result", "content": "x"}]},
+            },
+            separators=(",", ":"),
+        )
+        + "\n"
+    )
+    fails(capsys, "no user content", "import", "--to", str(profile), "--overwrite", empty.stem)
+
+    blank = make_transcript()
+    blank.write_text("\n\n")
+    fails(capsys, "no parseable lines", "import", "--to", str(profile), "--session", blank.stem)
+
+    fails(
+        capsys,
+        "target profile not found",
+        "import",
+        "--to",
+        str(tmp_path / "missing"),
+        "--limit",
+        "1",
+    )
+
+    monkeypatch.setattr("claude_profiles.commands.importer.profile_is_running", lambda _: True)
+    fails(capsys, "instance is running", "import", "--to", str(profile), "--limit", "1")
+
+
+def test_a_sidechain_is_refused_unless_allowed(profile, capsys):
+    folder = paths.cli_projects() / slug_for("/work/project")
+    side_dir = folder / "parent-id" / SUBAGENT_DIR
+    side_dir.mkdir(parents=True, exist_ok=True)
+    side = side_dir / "agent-0.jsonl"
+    stamp = "2026-01-01T10:00:00.000Z"
+    side.write_text(dump(user_turn("real subagent work", "/work/project", stamp, "agent-0")) + "\n")
+
+    fails(capsys, "subagent sidechain", "import", "--to", str(profile), "--session", str(side))
+
+    assert run("import", "--to", str(profile), "--session", str(side), "--allow-sidechain") == 0
+    assert any(e["cliSessionId"] == "agent-0" for e in read_entries(profile))
+
+
+def test_an_absorbed_session_is_skipped_when_its_successor_is_a_fresh_candidate():
+    absorbed = make_transcript(title="Absorbed segment")
+    successor = make_transcript(title="Later session")
+    make_profile(
+        "recorder",
+        entries=[
+            template_entry(
+                sessionId="local_rec",
+                cliSessionId=successor.stem,
+                priorCliSessionIds=[absorbed.stem],
+            )
+        ],
+    )
+    target = make_profile("target", entries=[template_entry()])
+
+    run("import", "--to", str(target), "--limit", "10")
+
+    ids = {e["cliSessionId"] for e in read_entries(target)}
+    assert absorbed.stem not in ids
+    assert successor.stem in ids
+
+
+def test_overwrite_of_a_fresh_session_notes_it_without_duplicating(profile, capsys):
+    path = make_transcript()
+    assert run("import", "--to", str(profile), "--limit", "10", "--overwrite", path.stem) == 0
+    matches = [e for e in read_entries(profile) if e["cliSessionId"] == path.stem]
+    assert len(matches) == 1
+    assert "not in the profile" in capsys.readouterr().out
+
+
+def test_rewrite_content_rewrites_paths_in_message_bodies(profile):
+    path = make_transcript(cwd="/old/root", turns=("see /old/root/notes.txt",))
+    assert (
+        run(
+            "import",
+            "--to",
+            str(profile),
+            "--session",
+            path.stem,
+            "--remap",
+            "/old/root=/new/root",
+            "--rewrite-content",
+        )
+        == 0
+    )
+
+    entry = next(e for e in read_entries(profile) if e["cliSessionId"] != "template-cli-id")
+    published = find_transcript(entry["cliSessionId"])
+    text = published.read_text()
+    assert "/new/root/notes.txt" in text
+    assert "/old/root" not in text
+
+    manifest = read_manifest(runs()[0])
+    assert manifest["records"][0]["pathRewrites"] > 0
+
+
+def test_a_changed_transcript_is_rolled_back_or_marked_live(profile, monkeypatch, capsys):
+    path = make_transcript()
+
+    counter = itertools.count()
+    monkeypatch.setattr("claude_profiles.commands.importer.sha256", lambda _: str(next(counter)))
+    assert run("import", "--to", str(profile), "--session", path.stem) == 0
+    out = capsys.readouterr().out
+    assert "still running" in out
+    assert not any(e["cliSessionId"] == path.stem for e in read_entries(profile))
+
+    counter = itertools.count()
+    monkeypatch.setattr("claude_profiles.commands.importer.sha256", lambda _: str(next(counter)))
+    assert run("import", "--to", str(profile), "--session", path.stem, "--allow-live") == 0
+    assert any(e["cliSessionId"] == path.stem for e in read_entries(profile))
+    assert "hash not asserted" in capsys.readouterr().out
+
+
+def test_validate_reports_each_kind_of_failure(tmp_path, capsys):
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("original\n")
+    original_sha = sha256(transcript)
+    transcript.write_text("changed\n")
+    current_sha = sha256(transcript)
+
+    good_index = tmp_path / "good.json"
+    good_index.write_text(json.dumps({"cwd": "/right"}))
+    bad_json_index = tmp_path / "bad.json"
+    bad_json_index.write_text("{not json")
+    wrong_cwd_index = tmp_path / "wrong.json"
+    wrong_cwd_index.write_text(json.dumps({"cwd": "/other"}))
+
+    base = {
+        "originalTranscript": str(transcript),
+        "originalSha256": current_sha,
+        "wasLive": False,
+        "publishedTranscript": None,
+        "cwd": "/right",
+        "replacedEntryBackup": None,
+        "replacedEntryPath": None,
+    }
+    records = [
+        {**base, "originalSha256": original_sha, "indexEntry": str(good_index)},
+        {**base, "indexEntry": str(bad_json_index)},
+        {
+            **base,
+            "indexEntry": str(good_index),
+            "publishedTranscript": str(tmp_path / "missing.jsonl"),
+        },
+        {**base, "indexEntry": str(wrong_cwd_index)},
+        {
+            **base,
+            "indexEntry": str(good_index),
+            "replacedEntryBackup": str(tmp_path / "missing-backup.json"),
+            "replacedEntryPath": str(tmp_path / "orig-entry.json"),
+        },
+    ]
+
+    assert importer._validate(records) is False
+    out = capsys.readouterr().out
+    assert "original modified" in out
+    assert "bad index JSON" in out
+    assert "missing transcript" in out
+    assert "wrong working directory" in out
+    assert "not backed up" in out

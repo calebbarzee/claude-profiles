@@ -1,6 +1,6 @@
-"""Filesystem locations, and the profile registry that lives in one of them.
+"""filesystem locations, and the profile registry that lives in one of them.
 
-Every location is a function, not a module constant, so tests can redirect them by setting HOME.
+every location is a function, not a module constant, so tests can redirect them by setting HOME.
 """
 
 from __future__ import annotations
@@ -23,26 +23,26 @@ def is_macos() -> bool:
 
 
 def default_profile() -> Path:
-    """Where Claude Desktop keeps state when launched normally."""
+    """where Claude Desktop keeps state when launched normally."""
     if is_macos():
         return Path.home() / "Library" / "Application Support" / "Claude"
     return _xdg("XDG_CONFIG_HOME", ".config") / "Claude"
 
 
 def profiles_root() -> Path:
-    """Parent directory of every profile this tool creates."""
+    """parent directory of every profile this tool creates."""
     if is_macos():
         return Path.home() / "Library" / "Application Support" / "Claude Profiles"
     return _xdg("XDG_CONFIG_HOME", ".config") / "claude-profiles"
 
 
 def state_dir() -> Path:
-    """Undo manifests and staged copies. Not user-facing, safe to delete."""
+    """undo manifests and staged copies. not user-facing, safe to delete."""
     return _xdg("XDG_STATE_HOME", ".local/state") / "claude-profiles"
 
 
 def cli_projects() -> Path:
-    """Shared transcript store, written by the Claude Code CLI."""
+    """shared transcript store, written by the Claude Code CLI."""
     return Path.home() / ".claude" / "projects"
 
 
@@ -63,7 +63,7 @@ def _xdg(var: str, fallback: str) -> Path:
 
 
 def profile_roots() -> list[Path]:
-    """The default profile plus every registered one, whichever exist."""
+    """the default profile plus every registered one, whichever exist."""
     roots = [default_profile()] if default_profile().is_dir() else []
     root = profiles_root()
     if root.is_dir():
@@ -72,7 +72,7 @@ def profile_roots() -> list[Path]:
 
 
 def profile_is_running(profile: Path) -> bool:
-    """True when a Claude instance holds this profile's data directory open."""
+    """true when a Claude instance holds this profile's data directory open."""
     if not shutil.which("pgrep"):
         return False
     done = subprocess.run(
@@ -147,7 +147,7 @@ def unique_slug(name: str, existing: list[Profile]) -> str:
 
 
 def resolve_profile(name: str) -> Path:
-    """Accept a registered profile id, a profile name, or a path."""
+    """accept a registered profile id, a profile name, or a path."""
     for profile in load_registry():
         if name in (profile.id, profile.name):
             return profile.path

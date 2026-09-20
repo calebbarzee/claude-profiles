@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from conftest import ACCOUNT, ORG, make_profile, make_transcript, read_entries, template_entry
 
 from claude_profiles.cli import main
+from claude_profiles.commands import migrate
 from claude_profiles.paths import default_profile
 
 
@@ -100,3 +104,55 @@ def test_migrate_reports_ok_when_the_transcript_is_present(capsys):
     run("migrate", "--from", str(source), "--to", str(target), "--yes")
     out = capsys.readouterr().out
     assert "missing from" not in out
+
+
+def test_migrate_aborts_when_a_profile_is_missing_or_running(monkeypatch, tmp_path, capsys):
+    target = make_profile("target")
+    assert run("migrate", "--from", str(tmp_path / "missing"), "--to", str(target), "--yes") == 1
+    assert "profile not found" in capsys.readouterr().err
+
+    source = source_profile()
+    monkeypatch.setattr("claude_profiles.commands.migrate.profile_is_running", lambda _: True)
+    assert run("migrate", "--from", str(source), "--to", str(target), "--yes") == 1
+    assert "quit it first" in capsys.readouterr().err
+
+
+def test_migrate_confirmation_prompt(monkeypatch, capsys):
+    source = source_profile()
+    target = make_profile("target")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert run("migrate", "--from", str(source), "--to", str(target)) == 1
+    assert "not a terminal" in capsys.readouterr().err
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _="": "n")
+    assert run("migrate", "--from", str(source), "--to", str(target)) == 0
+    assert "Aborted." in capsys.readouterr().out
+
+
+def test_migrate_leaves_an_existing_shadow_repo_alone(capsys):
+    source = source_profile()
+    target = make_profile("target")
+    existing = target / "git-shadow" / "repo-1"
+    existing.mkdir(parents=True)
+    (existing / "marker").write_text("keep")
+
+    assert run("migrate", "--from", str(source), "--to", str(target), "--yes") == 0
+    assert (existing / "marker").is_file()
+    assert "already present, left alone" in capsys.readouterr().out
+
+
+def test_validate_reports_every_way_a_copy_can_fail(tmp_path, capsys):
+    dst_scope = tmp_path / "dst"
+    dst_scope.mkdir()
+    (dst_scope / "local_bad.json").write_text("{not json")
+    (dst_scope / "local_ok.json").write_text(json.dumps({"title": "x"}))
+    files = [Path("local_missing.json"), Path("local_bad.json"), Path("local_ok.json")]
+
+    ok = migrate._validate(files, dst_scope)
+    out = capsys.readouterr().out
+    assert ok is False
+    assert "not copied" in out
+    assert "not valid JSON" in out
+    assert "has no cliSessionId" in out

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
 
 import pytest
 from conftest import ACCOUNT, ORG, make_profile, template_entry, write_settings
@@ -90,6 +89,19 @@ def test_load_template_prefers_the_newest_entry_and_skips_broken_ones():
     assert template["sessionId"] == "local_a"
 
 
+def test_load_template_with_an_explicit_path(tmp_path):
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(template_entry()))
+    data, used = index.load_template(tmp_path, good)
+    assert used == good
+    assert data["sessionId"] == "local_template"
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{oops")
+    with pytest.raises(Abort, match="template is not readable JSON"):
+        index.load_template(tmp_path, bad)
+
+
 def test_load_template_reports_when_there_is_nothing_to_copy_from():
     profile = make_profile()
     with pytest.raises(Abort, match="no usable local_"):
@@ -102,14 +114,12 @@ def test_retarget_cwd_reaches_nested_fields_only():
         "promptAppendSnapshot": {"cwd": "/old", "cliVersion": "2.0"},
         "notes": [{"originCwd": "/old", "text": "/old stays here"}],
     }
-    hits: Counter[str] = Counter()
-    after = index.retarget_cwd(before, "/new", hits)
+    after = index.retarget_cwd(before, "/new")
     assert after["cwd"] == "/new"
     assert after["promptAppendSnapshot"]["cwd"] == "/new"
     assert after["promptAppendSnapshot"]["cliVersion"] == "2.0"
     assert after["notes"][0]["originCwd"] == "/new"
     assert after["notes"][0]["text"] == "/old stays here"
-    assert sum(hits.values()) == 3
 
 
 def test_walk_cwds_names_where_each_value_came_from():
@@ -152,7 +162,7 @@ FACTS = {
 
 def test_build_entry_applies_the_field_policy():
     perms = {"permissionMode": "ask", "chromePermissionMode": "always_ask"}
-    entry, tally = index.build_entry(template_entry(), FACTS, "cli-real", perms)
+    entry = index.build_entry(template_entry(), FACTS, "cli-real", perms)
 
     assert entry["cliSessionId"] == "cli-real"
     assert entry["title"] == "Real session"
@@ -173,7 +183,6 @@ def test_build_entry_applies_the_field_policy():
     assert entry["aFutureFieldTheAppAdded"] == {"kept": True}
 
     assert all(value == "/work/project" for _, value in index.walk_cwds(entry))
-    assert tally["RETARGETED"] == 1
 
 
 def test_build_entry_does_not_mutate_the_template():
@@ -185,13 +194,13 @@ def test_build_entry_does_not_mutate_the_template():
 
 def test_build_entry_falls_back_to_the_template_model():
     facts = {**FACTS, "model": None, "effort": None}
-    entry, _ = index.build_entry(template_entry(), facts, "cli-real", dict(index.CONSERVATIVE))
+    entry = index.build_entry(template_entry(), facts, "cli-real", dict(index.CONSERVATIVE))
     assert entry["model"] == "claude-sonnet-5"
     assert entry["effort"] == "medium"
 
 
 def test_build_entry_adds_neutral_fields_a_sparse_template_lacks():
-    entry, _ = index.build_entry({"title": "x"}, FACTS, "cli-real", dict(index.CONSERVATIVE))
+    entry = index.build_entry({"title": "x"}, FACTS, "cli-real", dict(index.CONSERVATIVE))
     assert entry["alwaysAllowedReasons"] == []
     assert entry["chromePermissionMode"] == "always_ask"
 

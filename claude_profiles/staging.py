@@ -1,7 +1,4 @@
-"""Staging directories and the manifests that make a run reversible.
-
-``claude-profiles undo <run>`` reads the manifest back.
-"""
+"""staging directories and the manifests that make a run reversible. ``undo`` reads them back."""
 
 from __future__ import annotations
 
@@ -26,7 +23,7 @@ def sha256(path: Path) -> str:
 
 
 def new_run(kind: str, explicit: Path | None = None) -> Path:
-    """A fresh staging directory. ``kind`` is ``import`` or ``optimize``."""
+    """a fresh staging directory."""
     if explicit:
         run = explicit.expanduser().resolve()
     else:
@@ -37,7 +34,7 @@ def new_run(kind: str, explicit: Path | None = None) -> Path:
 
 
 def runs() -> list[Path]:
-    """Every run directory holding a manifest, newest first."""
+    """every run directory holding a manifest, newest first."""
     root = state_dir() / "runs"
     if not root.is_dir():
         return []

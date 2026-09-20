@@ -30,7 +30,6 @@ def test_backup_keeps_session_state_and_drops_runtime(tmp_path):
     assert (kept / "claude-code-sessions" / ACCOUNT / ORG / "local_a.json").is_file()
     assert (kept / "local-agent-mode-sessions" / "kept.json").is_file()
     assert (kept / "config.json").is_file()
-    # runtime, caches and built-in skills are re-downloaded or rebuilt
     assert not (kept / "claude-code").exists()
     assert not (kept / "Cache").exists()
     assert not (kept / "local-agent-mode-sessions" / "skills-plugin").exists()
@@ -64,3 +63,13 @@ def test_backup_rejects_mixing_all_with_names(tmp_path, capsys):
 def test_backup_skips_a_path_that_is_not_a_profile(tmp_path, capsys):
     assert run("backup", str(tmp_path / "nope"), "--out", str(tmp_path / "s")) == 0
     assert "skip" in capsys.readouterr().out
+
+
+def test_backup_defaults_to_the_default_profile_and_refuses_when_none_exist(tmp_path, capsys):
+    assert run("backup", "--all", "--out", str(tmp_path / "s0")) == 1
+    assert "no profiles found" in capsys.readouterr().err
+
+    (default_profile() / "claude-code-sessions" / ACCOUNT / ORG).mkdir(parents=True)
+    out = tmp_path / "s1"
+    assert run("backup", "--out", str(out)) == 0
+    assert (out / "default").is_dir()

@@ -1,21 +1,16 @@
-"""Claude Desktop's per-profile session index.
-
-See docs/session-index.md.
-"""
+"""Claude Desktop's per-profile session index. see docs/session-index.md."""
 
 from __future__ import annotations
 
 import json
 import re
 import uuid
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from . import Abort
 from .paths import cli_settings, profile_roots
 
-# Fields taken from the transcript, not from the template.
 DERIVED = frozenset(
     {
         "sessionId",
@@ -32,7 +27,6 @@ DERIVED = frozenset(
     }
 )
 
-# per-session grants and run state a template must not hand to a new session.
 NEUTRAL: dict[str, Any] = {
     "alwaysAllowedReasons": [],
     "sessionPermissionUpdates": [],
@@ -42,21 +36,16 @@ NEUTRAL: dict[str, Any] = {
     "spawnSeed": {},
     "isArchived": False,
     "lastSpawnRootDetected": False,
-    # doesn't follow a later disconnect, so a copied one can name a connector
-    # the account no longer has.
     "remoteMcpServersConfig": [],
 }
 
-# dropped rather than emptied: an entry with no error omits these keys entirely.
 STALE_RUN_STATE = ("error", "errorAt", "priorErrorMark")
 
-# recovered from the app bundle by tools/permission-audit.sh, not invented.
 CONSERVATIVE = {"permissionMode": "ask", "chromePermissionMode": "always_ask"}
 PERMISSION_FIELDS = tuple(CONSERVATIVE)
 
 STRUCTURAL_KEYS = ("cwd", "originCwd")
 
-# matches the scratch-workspaces path the app generates for a folderless chat.
 SCRATCH_WORKSPACE = re.compile(
     r"[/\\]scratch-workspaces[/\\][^/\\]+[/\\][^/\\]+[/\\]"
     r"scratch-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}(?:[/\\]|$)"
@@ -76,7 +65,7 @@ def read_json(path: Path) -> dict[str, Any] | None:
 
 
 def session_scope(profile: Path) -> Path:
-    """The account/org directory holding a profile's index entries."""
+    """the account/org directory holding a profile's index entries."""
     base = profile / "claude-code-sessions"
     if not base.is_dir():
         raise Abort(f"{profile} has no claude-code-sessions/; sign in to that profile first")
@@ -89,7 +78,7 @@ def session_scope(profile: Path) -> Path:
 
 
 def all_session_scopes() -> list[Path]:
-    """Every scope on this machine, across every profile."""
+    """every scope on this machine, across every profile."""
     scopes = []
     for root in profile_roots():
         base = root / "claude-code-sessions"
@@ -108,7 +97,7 @@ def entries(scope: Path) -> list[tuple[Path, dict[str, Any]]]:
 
 
 def load_template(scope: Path, explicit: Path | None) -> tuple[dict[str, Any], Path]:
-    """An entry the app itself wrote, to copy unrecognised fields from."""
+    """an entry the app itself wrote, to copy unrecognised fields from."""
     if explicit:
         data = read_json(explicit)
         if data is None:
@@ -126,7 +115,7 @@ def load_template(scope: Path, explicit: Path | None) -> tuple[dict[str, Any], P
 
 
 def indexed_cli_map(scope: Path) -> dict[str, dict[str, Any]]:
-    """Every CLI session id this profile already accounts for."""
+    """every CLI session id this profile already accounts for."""
     out: dict[str, dict[str, Any]] = {}
     for path, data in entries(scope):
         claims: list[tuple[str, str]] = []
@@ -149,7 +138,7 @@ def indexed_cli_map(scope: Path) -> dict[str, dict[str, Any]]:
 
 
 def lineage_map(scopes: list[Path]) -> dict[str, dict[str, Any]]:
-    """Absorbed CLI session id -> the later session that absorbed it."""
+    """absorbed CLI session id -> the later session that absorbed it."""
     out: dict[str, dict[str, Any]] = {}
     for scope in scopes:
         for _path, data in entries(scope):
@@ -166,25 +155,20 @@ def lineage_map(scopes: list[Path]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def retarget_cwd(value: Any, cwd: str, hits: Counter[str] | None = None) -> Any:
-    """Point every nested working-directory field at one folder."""
+def retarget_cwd(value: Any, cwd: str) -> Any:
+    """point every nested working-directory field at one folder."""
     if isinstance(value, dict):
-        out = {}
-        for k, v in value.items():
-            if k in STRUCTURAL_KEYS and isinstance(v, str):
-                out[k] = cwd
-                if hits is not None:
-                    hits[k] += 1
-            else:
-                out[k] = retarget_cwd(v, cwd, hits)
-        return out
+        return {
+            k: cwd if k in STRUCTURAL_KEYS and isinstance(v, str) else retarget_cwd(v, cwd)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [retarget_cwd(v, cwd, hits) for v in value]
+        return [retarget_cwd(v, cwd) for v in value]
     return value
 
 
 def walk_cwds(value: Any, path: str = "") -> list[tuple[str, str]]:
-    """Every working-directory value in an entry, with where it was found."""
+    """every working-directory value in an entry, with where it was found."""
     found: list[tuple[str, str]] = []
     if isinstance(value, dict):
         for k, v in value.items():
@@ -200,7 +184,7 @@ def walk_cwds(value: Any, path: str = "") -> list[tuple[str, str]]:
 
 
 def resolve_permissions() -> tuple[dict[str, str], dict[str, str]]:
-    """Prefer the user's own default, fall back to the conservative value."""
+    """prefer the user's own default, fall back to the conservative value."""
     settings = read_json(cli_settings()) or {}
     permissions = settings.get("permissions")
     default_mode = permissions.get("defaultMode") if isinstance(permissions, dict) else None
@@ -222,38 +206,24 @@ def build_entry(
     facts: dict[str, Any],
     cli_session_id: str,
     perms: dict[str, str],
-) -> tuple[dict[str, Any], Counter[str]]:
-    """Generate an index entry for one transcript."""
-    entry: dict[str, Any] = {}
-    tally: Counter[str] = Counter()
-    nested: Counter[str] = Counter()
-
+) -> dict[str, Any]:
     def clone(value: Any) -> Any:
         return json.loads(json.dumps(value))
 
+    entry: dict[str, Any] = {}
     for key, value in template.items():
-        if key in STALE_RUN_STATE:
-            tally["DROPPED"] += 1
-        elif key in NEUTRAL:
+        if key in STALE_RUN_STATE or key in DERIVED:
+            continue
+        if key in NEUTRAL:
             entry[key] = clone(NEUTRAL[key])
-            tally["NEUTRAL"] += 1
         elif key in perms:
             entry[key] = perms[key]
-            tally["PERMISSION"] += 1
-        elif key in DERIVED:
-            tally["DERIVED"] += 1
         else:
-            entry[key] = retarget_cwd(clone(value), facts["cwd"], nested)
-            tally["APP_TRUTH"] += 1
-
+            entry[key] = retarget_cwd(clone(value), facts["cwd"])
     for key, value in NEUTRAL.items():
-        if key not in entry:
-            entry[key] = clone(value)
-            tally["NEUTRAL"] += 1
+        entry.setdefault(key, clone(value))
     for key, text in perms.items():
-        if key not in entry:
-            entry[key] = text
-            tally["PERMISSION"] += 1
+        entry.setdefault(key, text)
 
     entry["sessionId"] = f"local_{uuid.uuid4()}"
     entry["cliSessionId"] = cli_session_id
@@ -270,7 +240,4 @@ def build_entry(
     for key in ("model", "effort"):
         entry[key] = facts[key] if facts[key] is not None else template.get(key)
     entry.setdefault("titleSource", template.get("titleSource", "auto"))
-
-    if nested:
-        tally["RETARGETED"] += sum(nested.values())
-    return entry, tally
+    return entry

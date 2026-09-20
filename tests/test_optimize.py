@@ -3,6 +3,8 @@ from __future__ import annotations
 from conftest import make_profile, make_transcript, read_entries, template_entry
 
 from claude_profiles.cli import main
+from claude_profiles.commands import optimize
+from claude_profiles.staging import new_run, write_manifest
 
 SCRATCH = (
     "/Users/x/Library/Application Support/Claude/scratch-workspaces"
@@ -24,7 +26,6 @@ def imported_profile():
 def test_optimize_only_touches_generated_entries_by_default(capsys):
     profile = imported_profile()
     assert run("optimize", "--to", str(profile), "--clear-errors") == 0
-    # the app-written template still carries its own real error
     assert any("error" in e for e in read_entries(profile))
     assert "1 generated" in capsys.readouterr().out
 
@@ -111,3 +112,27 @@ def test_optimize_reports_an_id_it_cannot_find(capsys):
     profile = make_profile(entries=[template_entry()])
     assert run("optimize", "--to", str(profile), "--clear-errors", "--only", "nope") == 1
     assert "no entries matched" in capsys.readouterr().err
+
+
+def test_generated_entries_skips_bad_or_irrelevant_runs():
+    profile = make_profile(entries=[template_entry()])
+    other = make_profile("other")
+    run("import", "--to", str(other), "--session", make_transcript().stem)
+
+    bad = new_run("import")
+    (bad / "manifest.json").write_text("not json")
+
+    wrong_kind = new_run("optimize")
+    write_manifest(wrong_kind, "optimize", profile, records=[])
+
+    assert optimize.generated_entries(profile) == set()
+
+
+def test_optimize_aborts_when_profile_missing_or_running(monkeypatch, tmp_path, capsys):
+    assert run("optimize", "--to", str(tmp_path / "nope"), "--clear-errors") == 1
+    assert "profile not found" in capsys.readouterr().err
+
+    profile = make_profile(entries=[template_entry()])
+    monkeypatch.setattr("claude_profiles.commands.optimize.profile_is_running", lambda _: True)
+    assert run("optimize", "--to", str(profile), "--clear-errors") == 1
+    assert "quit it first" in capsys.readouterr().err

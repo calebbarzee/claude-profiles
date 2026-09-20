@@ -130,9 +130,9 @@ The Raycast extension lives in `raycast/`:
 cd raycast && npm install && npm run dev
 ```
 
-`tools/` holds forensic scripts that document undocumented formats. Each records
-what it established in its header, so re-running one after a Claude Desktop
-update tells you whether that finding still holds. They are macOS-only.
+`tools/` holds forensic scripts that document undocumented formats. Re-running
+one after a Claude Desktop update tells you whether its finding still holds.
+They are macOS-only.
 
 | Script | Establishes |
 | --- | --- |

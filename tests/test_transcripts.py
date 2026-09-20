@@ -29,7 +29,7 @@ def test_classify_counts_real_turns_and_names_commands():
         dump(user_turn("<command-name>/model</command-name>", "/w", stamp, sid)),
         dump(user_turn("<local-command-stdout>out</local-command-stdout>", "/w", stamp, sid)),
     ]
-    turns, real, commands = tr.classify_content(lines, tr.parse_line)
+    turns, real, commands = tr.classify_content(lines)
     assert (turns, real, commands) == (3, 1, ["/model"])
 
 
@@ -37,13 +37,13 @@ def test_an_unrecognised_command_counts_as_real_content():
     line = dump(
         user_turn("<command-name>/my-custom</command-name>", "/w", "2026-01-01T00:00:00Z", "s")
     )
-    _turns, real, commands = tr.classify_content([line], tr.parse_line)
+    _turns, real, commands = tr.classify_content([line])
     assert (real, commands) == (1, ["/my-custom"])
 
 
 def test_sidechain_turns_never_count_as_user_content():
     line = user_turn("sub work", "/w", "2026-01-01T00:00:00Z", "s") | {"isSidechain": True}
-    _turns, real, _commands = tr.classify_content([dump(line)], tr.parse_line)
+    _turns, real, _commands = tr.classify_content([dump(line)])
     assert real == 0
 
 
@@ -51,15 +51,13 @@ def test_a_rote_only_session_is_marked_rote_not_empty():
     row = tr.summarize(command_transcript("/exit"))
     assert row["isRote"] and not row["isEmpty"]
     assert row["commands"] == ["/exit"]
-    # the CLI records one command as three user turns, so turn count alone
-    # would not have revealed this
+    # one slash command is recorded as three user turns
     assert row["turns"] == 3
 
 
 def test_a_session_with_no_user_content_is_marked_empty():
     path = make_transcript(title="Only tooling")
-    # a tool result arrives as a user turn with no text block: activity, not
-    # something the user said
+    # a tool result is a user turn with no text block
     path.write_text(
         dump(
             {

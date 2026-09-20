@@ -77,7 +77,6 @@ export async function addProfile(name: string): Promise<ClaudeProfile> {
   return profile;
 }
 
-/** Unregisters a profile, and optionally deletes its login and chats. */
 export async function removeProfile(
   id: string,
   deleteData: boolean,

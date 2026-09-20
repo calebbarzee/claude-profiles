@@ -55,3 +55,10 @@ def test_profile_roots_lists_the_default_and_every_created_profile(home):
 
 def test_state_dir_lives_under_home(home):
     assert home in paths.state_dir().parents
+
+
+def test_linux_locations_honour_xdg_config_home(monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "is_macos", lambda: False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    assert paths.default_profile() == tmp_path / "cfg" / "Claude"
+    assert paths.profiles_root() == tmp_path / "cfg" / "claude-profiles"

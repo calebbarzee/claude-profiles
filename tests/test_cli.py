@@ -5,6 +5,7 @@ import json
 import pytest
 from conftest import command_transcript, make_profile, make_transcript, template_entry
 
+from claude_profiles import Abort, staging
 from claude_profiles.cli import build_parser, main
 from claude_profiles.paths import default_profile
 
@@ -109,3 +110,24 @@ def test_inspect_rejects_an_unknown_file_type(tmp_path, capsys):
 def test_inspect_reports_an_empty_profile(tmp_path, capsys):
     assert run("inspect", str(tmp_path)) == 1
     assert "no local_*.json" in capsys.readouterr().err
+
+
+def test_inspect_reports_unparseable_lines_in_a_transcript(capsys):
+    path = make_transcript()
+    path.write_text(path.read_text() + "\n{broken\n")
+    assert run("inspect", str(path)) == 0
+    assert "unparseable lines: 1" in capsys.readouterr().out
+
+
+def test_read_manifest_rejects_junk(tmp_path):
+    unreadable = tmp_path / "bad"
+    unreadable.mkdir()
+    (unreadable / staging.MANIFEST_NAME).write_text("{oops")
+    with pytest.raises(Abort, match="not readable JSON"):
+        staging.read_manifest(unreadable)
+
+    not_a_manifest = tmp_path / "wrong"
+    not_a_manifest.mkdir()
+    (not_a_manifest / staging.MANIFEST_NAME).write_text(json.dumps({"no": "records"}))
+    with pytest.raises(Abort, match="not a run manifest"):
+        staging.read_manifest(not_a_manifest)
