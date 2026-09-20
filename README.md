@@ -130,10 +130,6 @@ The Raycast extension:
 npm install && npm run dev
 ```
 
-Publishing it to the Raycast store needs the `author` field in `package.json` to
-match a registered Raycast account handle; `ray lint` checks that against the
-store and will fail until it does.
-
 `tools/` holds forensic scripts that document undocumented formats. Each records
 what it established in its header, so re-running one after a Claude Desktop
 update tells you whether that finding still holds. They are macOS-only.
