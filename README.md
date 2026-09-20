@@ -61,29 +61,29 @@ claude-profiles undo --last
 
 ## Commands
 
-| Command | What it does |
-| --- | --- |
-| `profile add\|list\|open\|rm` | create, launch and forget isolated profiles |
-| `list` | list Claude Code CLI sessions, marked by what an import would do |
-| `import` | generate index entries so CLI sessions appear in a profile |
-| `migrate` | copy the session index from one profile to another |
-| `backup` | snapshot profile session state, excluding runtime and credentials |
-| `optimize` | clear stale error state, connector caches and dead scratch paths |
-| `undo` | reverse any run that wrote something |
-| `inspect` | print the shape of an index entry or a transcript |
+| Command                       | What it does                                                      |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `profile add\|list\|open\|rm` | create, launch and forget isolated profiles                       |
+| `list`                        | list Claude Code CLI sessions, marked by what an import would do  |
+| `import`                      | generate index entries so CLI sessions appear in a profile        |
+| `migrate`                     | copy the session index from one profile to another                |
+| `backup`                      | snapshot profile session state, excluding runtime and credentials |
+| `optimize`                    | clear stale error state, connector caches and dead scratch paths  |
+| `undo`                        | reverse any run that wrote something                              |
+| `inspect`                     | print the shape of an index entry or a transcript                 |
 
 `claude-profiles <command> --help` carries the detail. Start with `--dry-run` on
 anything that writes.
 
 ### Reading `list`
 
-| Mark | Meaning |
-| --- | --- |
-| `*` | already indexed in the target profile |
-| `+` | already there, absorbed into a later session as a prior CLI id |
-| `-` | no user content at all, always skipped |
-| `~` | only built-in slash commands, skipped by `--exclude-rote-commands` |
-| `s` | ran in a desktop scratch workspace, see `--scratch-sessions` |
+| Mark | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| `*`  | already indexed in the target profile                              |
+| `+`  | already there, absorbed into a later session as a prior CLI id     |
+| `-`  | no user content at all, always skipped                             |
+| `~`  | only built-in slash commands, skipped by `--exclude-rote-commands` |
+| `s`  | ran in a desktop scratch workspace, see `--scratch-sessions`       |
 
 ## Safety
 
@@ -146,12 +146,12 @@ cd raycast && npm test
 one after a Claude Desktop update tells you whether its finding still holds.
 They are macOS-only.
 
-| Script | Establishes |
-| --- | --- |
-| `trace-subagents.sh` | the sidechain layout and the `promptId` join |
-| `permission-audit.sh` | where permission settings live, and their valid enums |
-| `sample-brand-color.sh` | the brand hex, sampled from an app icon |
-| `make-icon.sh` | rebuilds `raycast/assets/icon.png` from `swap_icon.svg` |
+| Script                  | Establishes                                             |
+| ----------------------- | ------------------------------------------------------- |
+| `trace-subagents.sh`    | the sidechain layout and the `promptId` join            |
+| `permission-audit.sh`   | where permission settings live, and their valid enums   |
+| `sample-brand-color.sh` | the brand hex, sampled from an app icon                 |
+| `make-icon.sh`          | rebuilds `raycast/assets/icon.png` from `swap_icon.svg` |
 
 `raycast/assets/icon.png` is tinted `#D97757`, the most common opaque non-white pixel in
 Claude Desktop's own icon. Rebuilding it needs `rsvg-convert` (`brew install
@@ -170,6 +170,11 @@ that instance. Your default profile, launched normally, is unaffected.
 
 The index schema is undocumented and changes between app versions. Re-run the
 scripts in `tools/` after an update before trusting a large migration.
+
+## Credits
+
+Co-authored with Claude Fable 5.1 from Anthropic, which wrote and reviewed
+code, tests, and documentation across the CLI and the Raycast extension.
 
 ## License
 
