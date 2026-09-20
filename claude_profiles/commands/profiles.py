@@ -1,11 +1,8 @@
-"""Create, list, launch and forget isolated profiles.
+"""create, list, launch and forget isolated profiles.
 
-Each profile is an Electron ``--user-data-dir``: its own login, chats and
-settings, with nothing shared between them. The registry is a JSON file the
-Raycast extension reads and writes too, so both see the same profiles.
-
-On Linux each profile also gets an XDG ``.desktop`` launcher, which is what
-makes it show up in the app grid and be pinnable.
+each profile is an Electron ``--user-data-dir`` with its own login, chats and
+settings. the registry is a JSON file the Raycast extension also reads and
+writes. on Linux each profile also gets an XDG ``.desktop`` launcher.
 """
 
 from __future__ import annotations
@@ -30,7 +27,6 @@ from ..paths import (
 
 LINUX_BIN = "claude-desktop"
 
-# Distinct launcher badges, cycled so profiles stay visually separable.
 PALETTE = ("#3584e4", "#e01b24", "#33d17a", "#f5c211", "#9141ac", "#ed5b00")
 
 BADGE = (
@@ -42,7 +38,7 @@ BADGE = (
 
 DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
-Name=Claude — {name}
+Name=Claude ({name})
 Comment=Isolated Claude Desktop profile: {name}
 Exec={binary} "--user-data-dir={data_dir}"
 Icon={icon}
@@ -61,7 +57,7 @@ def badge_path(slug: str) -> Path:
 
 
 def write_launcher(profile: Profile, index: int) -> Path:
-    """XDG launcher plus a colored badge, so the app grid shows one per profile."""
+    """XDG launcher plus a colored badge, one per profile."""
     icon = badge_path(profile.id)
     icon.parent.mkdir(parents=True, exist_ok=True)
     letter = next((c for c in profile.name if c.isalnum()), "?").upper()
@@ -81,11 +77,7 @@ def write_launcher(profile: Profile, index: int) -> Path:
 
 
 def launch(data_dir: Path) -> None:
-    """Start a new instance against this data directory.
-
-    ``-n`` forces a new process even when Claude is already running under
-    another profile.
-    """
+    """start a new instance; ``-n`` forces a new process even if one is already running."""
     if is_macos():
         subprocess.run(
             ["open", "-n", "-a", "Claude", "--args", f"--user-data-dir={data_dir}"], check=True
@@ -121,11 +113,11 @@ def run_add(args: argparse.Namespace) -> int:
     print(f"  data dir : {data_dir}")
     if not is_macos():
         print(f"  launcher : {write_launcher(profile, len(existing))}")
-        print(f'\nFind "Claude — {name}" in your app grid and pin it.')
+        print(f'\nFind "Claude ({name})" in your app grid and pin it.')
 
     if args.open:
         launch(data_dir)
-        print("\nOpening. Sign in — that is what creates the account directory")
+        print("\nOpening. Sign in; that is what creates the account directory")
         print("every session migration writes into.")
     return 0
 

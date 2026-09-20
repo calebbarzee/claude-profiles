@@ -1,24 +1,10 @@
-"""Clean stale state out of index entries a profile already has.
+"""clean stale state out of index entries a profile already has. never reads a
+transcript, never creates or deletes a conversation; only entries this tool
+generated are touched unless ``--include-app-written`` is set.
 
-This never reads a transcript, never creates an entry, and never deletes a
-conversation. It only removes state that is stale, oversized, or points
-somewhere that no longer exists:
-
-``--clear-errors``
-    ``error``, ``errorAt`` and ``priorErrorMark`` record something that
-    happened to whichever entry an older import used as a template, usually a
-    rate limit, and the app shows an error badge for them.
-``--clear-connectors``
-    ``remoteMcpServersConfig`` caches the account's remote MCP servers as of
-    the moment the entry was written. It does not follow a later disconnect.
-    The live list is account-side, so this is a cache, not the source of truth.
-``--relocate-scratch DIR``
-    an entry whose working directory is an app-internal scratch workspace names
-    a folder the app empties when the session ends.
-
-By default only entries this tool generated are touched, recognised by the run
-manifests. ``--include-app-written`` widens that to entries the app wrote
-itself, whose error state was a real event.
+``--clear-errors``: drops error, errorAt and priorErrorMark left by a rate limit
+``--clear-connectors``: resets the cached remoteMcpServersConfig snapshot
+``--relocate-scratch DIR``: repoints an entry off an emptied scratch workspace
 """
 
 from __future__ import annotations
@@ -46,7 +32,7 @@ CONNECTOR_FIELD = "remoteMcpServersConfig"
 
 
 def generated_entries(profile: Path) -> set[str]:
-    """Entry filenames an import created here, per its run manifests."""
+    """entry filenames an import created here, per its run manifests."""
     out: set[str] = set()
     for run in runs():
         try:
@@ -89,7 +75,7 @@ def run_optimize(args: argparse.Namespace) -> int:
     if not profile.is_dir():
         raise Abort(f"profile not found: {profile}")
     if profile_is_running(profile):
-        raise Abort("a Claude instance is running on that profile — quit it first")
+        raise Abort("a Claude instance is running on that profile; quit it first")
 
     scope = session_scope(profile)
     rows = survey(scope, generated_entries(profile), args.include_app_written)
@@ -131,7 +117,7 @@ def run_optimize(args: argparse.Namespace) -> int:
         print(f"    {row['title'][:46]:48} {', '.join(sorted(actions))}")
 
     if args.dry_run:
-        print("\nDry run — nothing written.")
+        print("\nDry run, nothing written.")
         return 0
 
     run = new_run("optimize", args.staging)

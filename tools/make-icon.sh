@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
-# make-icon.sh — render assets/icon.png from swap_icon.svg.
-#
-# The source is a Noun Project export: a 100x125 viewBox whose bottom 25 units
-# hold a 5px attribution line, illegible at icon size. Crop back to the 100x100
-# artwork box; the attribution lives in the README.
-#
-# Shapes carry no fill attribute, so one CSS rule recolors them. BRAND comes
-# from sample-brand-color.sh. A mid-tone orange reads on light and dark Raycast
-# themes, so no icon@dark.png variant is needed.
+# make-icon.sh: renders assets/icon.png from swap_icon.svg, cropping the
+# Noun Project attribution strip and tinting shapes with BRAND.
 set -euo pipefail
 
 BRAND="${BRAND:-#D97757}"
@@ -26,8 +19,7 @@ tint="s{<defs\\s+id=\"defs3\"\\s*/>}{<defs><style>*{fill:$BRAND}</style></defs>}
 perl -0777 -pe "$crop; $tint" swap_icon.svg > .tmp/icon.svg
 rsvg-convert -w 512 -h 512 .tmp/icon.svg -o assets/icon.png
 
-# Dimensions come straight out of the PNG IHDR chunk, so this reports the same
-# way on macOS and Linux with no sips or ImageMagick dependency.
+# reads the IHDR chunk directly, no Pillow or ImageMagick dependency
 python3 - assets/icon.png "$BRAND" <<'PY'
 import os, struct, sys
 

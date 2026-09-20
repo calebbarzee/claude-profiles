@@ -1,8 +1,6 @@
 """Staging directories and the manifests that make a run reversible.
 
-Every command that writes copies what it will touch into a run directory under
-:func:`~claude_profiles.paths.state_dir`, then records what it did in
-``manifest.json``. ``claude-profiles undo <run>`` reads that back.
+``claude-profiles undo <run>`` reads the manifest back.
 """
 
 from __future__ import annotations

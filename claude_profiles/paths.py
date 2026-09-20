@@ -1,7 +1,6 @@
 """Filesystem locations, and the profile registry that lives in one of them.
 
-Every location is a function, never a module constant, so tests can redirect
-them all by setting ``HOME``.
+Every location is a function, not a module constant, so tests can redirect them by setting HOME.
 """
 
 from __future__ import annotations
@@ -73,11 +72,7 @@ def profile_roots() -> list[Path]:
 
 
 def profile_is_running(profile: Path) -> bool:
-    """True when a Claude instance holds this profile's data directory open.
-
-    Writing into a live profile races the app's own in-memory copy of the
-    index, which it rewrites wholesale on quit.
-    """
+    """True when a Claude instance holds this profile's data directory open."""
     if not shutil.which("pgrep"):
         return False
     done = subprocess.run(
@@ -86,11 +81,6 @@ def profile_is_running(profile: Path) -> bool:
         check=False,
     )
     return done.returncode == 0
-
-
-# --------------------------------------------------------------------------
-# registry
-# --------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

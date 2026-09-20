@@ -1,12 +1,6 @@
 """Claude Desktop's per-profile session index.
 
-One JSON object per session at
-``<profile>/claude-code-sessions/<account>/<org>/local_<uuid>.json``, pointing
-at a transcript in the shared CLI store through ``cliSessionId``.
-
-The schema is undocumented and gains fields between app versions, so
-:func:`build_entry` resolves fields by rule rather than from a fixed list.
-See ``docs/session-index.md``.
+See docs/session-index.md.
 """
 
 from __future__ import annotations
@@ -38,8 +32,7 @@ DERIVED = frozenset(
     }
 )
 
-# Per-session grants and run state. Inherited from a template they would hand a
-# new session approvals nobody granted it.
+# per-session grants and run state a template must not hand to a new session.
 NEUTRAL: dict[str, Any] = {
     "alwaysAllowedReasons": [],
     "sessionPermissionUpdates": [],
@@ -49,28 +42,21 @@ NEUTRAL: dict[str, Any] = {
     "spawnSeed": {},
     "isArchived": False,
     "lastSpawnRootDetected": False,
-    # Per-session cache of the account's remote MCP servers, ~90 KB once a
-    # connector with many tools is attached. It does not follow a later
-    # disconnect, so a copied one names a connector the account may not have.
+    # doesn't follow a later disconnect, so a copied one can name a connector
+    # the account no longer has.
     "remoteMcpServersConfig": [],
 }
 
-# Records something that happened to the *template* session, usually a rate
-# limit, and shows as an error badge. Dropped rather than emptied, because an
-# entry with no error omits these keys entirely.
+# dropped rather than emptied: an entry with no error omits these keys entirely.
 STALE_RUN_STATE = ("error", "errorAt", "priorErrorMark")
 
-# Most conservative values attested in the app bundle, recovered by
-# tools/permission-audit.sh rather than invented.
+# recovered from the app bundle by tools/permission-audit.sh, not invented.
 CONSERVATIVE = {"permissionMode": "ask", "chromePermissionMode": "always_ask"}
 PERMISSION_FIELDS = tuple(CONSERVATIVE)
 
-# Any key naming a working directory, at any depth.
 STRUCTURAL_KEYS = ("cwd", "originCwd")
 
-# A desktop chat with no folder attached runs under
-# <userData>/scratch-workspaces/<account>/<org>/scratch-<date>-<hex>, which the
-# app computes itself and empties when the session ends.
+# matches the scratch-workspaces path the app generates for a folderless chat.
 SCRATCH_WORKSPACE = re.compile(
     r"[/\\]scratch-workspaces[/\\][^/\\]+[/\\][^/\\]+[/\\]"
     r"scratch-\d{4}-\d{2}-\d{2}-[0-9a-f]{6}(?:[/\\]|$)"
@@ -90,13 +76,13 @@ def read_json(path: Path) -> dict[str, Any] | None:
 
 
 def session_scope(profile: Path) -> Path:
-    """The ``<account>/<org>`` directory holding a profile's index entries."""
+    """The account/org directory holding a profile's index entries."""
     base = profile / "claude-code-sessions"
     if not base.is_dir():
-        raise Abort(f"{profile} has no claude-code-sessions/ — sign in to that profile first")
+        raise Abort(f"{profile} has no claude-code-sessions/; sign in to that profile first")
     dirs = sorted(p for p in base.glob("*/*") if p.is_dir())
     if not dirs:
-        raise Abort(f"{profile} has no <account>/<org> directory — sign in to that profile first")
+        raise Abort(f"{profile} has no <account>/<org> directory; sign in to that profile first")
     if len(dirs) > 1:
         raise Abort(f"{profile} holds {len(dirs)} accounts; migrate manually to avoid guessing")
     return dirs[0]
@@ -140,13 +126,7 @@ def load_template(scope: Path, explicit: Path | None) -> tuple[dict[str, Any], P
 
 
 def indexed_cli_map(scope: Path) -> dict[str, dict[str, Any]]:
-    """Every CLI session id this profile already accounts for.
-
-    An entry claims a session through ``cliSessionId`` (it *is* that session)
-    and through ``priorCliSessionIds`` (it is a later segment that absorbed it
-    when the session was resumed or compacted into a new id). Both count, so
-    neither is re-imported. A direct claim wins over an absorbed one.
-    """
+    """Every CLI session id this profile already accounts for."""
     out: dict[str, dict[str, Any]] = {}
     for path, data in entries(scope):
         claims: list[tuple[str, str]] = []
@@ -169,12 +149,7 @@ def indexed_cli_map(scope: Path) -> dict[str, dict[str, Any]]:
 
 
 def lineage_map(scopes: list[Path]) -> dict[str, dict[str, Any]]:
-    """Absorbed CLI session id -> the later session that absorbed it.
-
-    This lineage is recorded only in an index entry; a successor's transcript
-    never names its predecessor. Reading every profile on the machine lets a
-    fresh profile inherit what another one already learned.
-    """
+    """Absorbed CLI session id -> the later session that absorbed it."""
     out: dict[str, dict[str, Any]] = {}
     for scope in scopes:
         for _path, data in entries(scope):
@@ -191,19 +166,8 @@ def lineage_map(scopes: list[Path]) -> dict[str, dict[str, Any]]:
     return out
 
 
-# --------------------------------------------------------------------------
-# working directories
-# --------------------------------------------------------------------------
-
-
 def retarget_cwd(value: Any, cwd: str, hits: Counter[str] | None = None) -> Any:
-    """Point every nested working-directory field at one folder.
-
-    Copied fields can embed the template session's own folder: the observed
-    case is ``promptAppendSnapshot``, whose ``cwd`` tracked the entry's in every
-    app-written entry inspected. Only :data:`STRUCTURAL_KEYS` are touched, so a
-    field a later app version adds still carries through untouched.
-    """
+    """Point every nested working-directory field at one folder."""
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -235,18 +199,8 @@ def walk_cwds(value: Any, path: str = "") -> list[tuple[str, str]]:
     return found
 
 
-# --------------------------------------------------------------------------
-# permissions
-# --------------------------------------------------------------------------
-
-
 def resolve_permissions() -> tuple[dict[str, str], dict[str, str]]:
-    """Prefer the user's own default, fall back to the conservative value.
-
-    ``permissionMode`` has a global home in ``~/.claude/settings.json``.
-    ``chromePermissionMode`` has none anywhere on disk, so it never inherits
-    whatever the most recent session happened to be left on.
-    """
+    """Prefer the user's own default, fall back to the conservative value."""
     settings = read_json(cli_settings()) or {}
     permissions = settings.get("permissions")
     default_mode = permissions.get("defaultMode") if isinstance(permissions, dict) else None
@@ -263,22 +217,13 @@ def resolve_permissions() -> tuple[dict[str, str], dict[str, str]]:
     return values, why
 
 
-# --------------------------------------------------------------------------
-# entry assembly
-# --------------------------------------------------------------------------
-
-
 def build_entry(
     template: dict[str, Any],
     facts: dict[str, Any],
     cli_session_id: str,
     perms: dict[str, str],
 ) -> tuple[dict[str, Any], Counter[str]]:
-    """Generate an index entry for one transcript.
-
-    Unrecognised template fields are copied verbatim, which is what carries a
-    field added by a future app version through with the app's own value.
-    """
+    """Generate an index entry for one transcript."""
     entry: dict[str, Any] = {}
     tally: Counter[str] = Counter()
     nested: Counter[str] = Counter()

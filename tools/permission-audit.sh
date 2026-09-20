@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
-#
-# permission-audit.sh — where permission settings live, and which enum values
-# the app bundle actually admits. macOS only.
-#
-# WHAT THIS ESTABLISHED
-#
-#   permissionMode        has a global home:
-#                         ~/.claude/settings.json -> permissions.defaultMode
-#   chromePermissionMode  has none anywhere on disk. It exists only inside each
-#                         session's index entry, so a generated session has
-#                         nothing to inherit and takes a conservative default.
-#
-# Enum values recovered from app.asar rather than guessed:
-#
-#   chromePermissionMode  skip_all_permission_checks | always_ask
-#   permissionMode        ask | default | acceptEdits           (assigned)
-#                         auto | plan | bypassPermissions | dontAsk (literals)
-#
-# `claude-profiles import` falls back to "ask" and "always_ask" on the strength
-# of this. Re-run after a Claude Desktop update before trusting a large import.
-#
+# permission-audit.sh checks where permission settings live and which enum
+# values the app bundle admits. macOS only.
+# See docs/session-index.md.
 set -euo pipefail
 
 APP="${1:-/Applications/Claude.app}"

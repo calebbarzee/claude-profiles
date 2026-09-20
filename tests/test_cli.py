@@ -14,7 +14,7 @@ def run(*argv: str) -> int:
 
 
 def test_every_leaf_subcommand_dispatches_to_a_handler():
-    """A subparser with no handler would crash on use, not at build time."""
+    """a subparser with no handler would crash on use, not at build time."""
 
     def leaves(parser):
         groups = list(parser._subparsers._group_actions) if parser._subparsers else []

@@ -12,7 +12,6 @@ from claude_profiles.paths import desktop_entries_dir, load_registry, profiles_r
 
 @pytest.fixture(autouse=True)
 def never_launch(monkeypatch):
-    """Nothing in this suite should start a real Claude instance."""
     started: list[str] = []
     monkeypatch.setattr(cmd, "launch", lambda data_dir: started.append(str(data_dir)))
     return started
@@ -106,7 +105,7 @@ def test_linux_add_writes_a_desktop_launcher_and_a_badge(linux):
     run("profile", "add", "Work", "--no-open")
     entry = desktop_entries_dir() / "claude-profile-work.desktop"
     body = entry.read_text()
-    assert "Name=Claude — Work" in body
+    assert "Name=Claude (Work)" in body
     assert f'Exec=claude-desktop "--user-data-dir={load_registry()[0].dataDir}"' in body
     assert "StartupWMClass=Claude" in body
 

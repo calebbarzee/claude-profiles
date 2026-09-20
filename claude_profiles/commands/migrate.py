@@ -1,18 +1,12 @@
-"""Copy the Claude Code session index from one profile to another.
+"""copy the Claude Code session index from one profile to another.
 
-Only the index moves. Transcripts live in one shared store that every profile
-already reads, so a new profile shows no sessions purely because nothing points
-at them yet.
+only the index moves; transcripts live in one shared store every profile reads.
 
-Deliberately not copied:
+deliberately not copied:
 
-``scheduled-tasks.json``
-    the target writes its own; a stale copy would point scheduled work at
-    session ids that do not exist there
-``git-worktrees.json``
-    holds absolute paths into the source profile's scratch workspaces
-``claude-code/``, ``claude-code-vm/``, ``local-agent-mode-sessions/``
-    runtime and built-in skills, re-downloaded or rebuilt on launch
+``scheduled-tasks.json``: the target writes its own
+``git-worktrees.json``: holds paths into the source profile's scratch workspaces
+``claude-code/``, ``claude-code-vm/``, ``local-agent-mode-sessions/``: rebuilt on launch
 """
 
 from __future__ import annotations
@@ -41,7 +35,7 @@ def run_migrate(args: argparse.Namespace) -> int:
     if source == target:
         raise Abort("source and target are the same directory")
     if profile_is_running(target):
-        raise Abort("a Claude instance is running on the target profile — quit it first")
+        raise Abort("a Claude instance is running on the target profile; quit it first")
 
     src_scope, dst_scope = session_scope(source), session_scope(target)
     files = sorted(src_scope.glob("local_*.json"))
@@ -53,8 +47,6 @@ def run_migrate(args: argparse.Namespace) -> int:
     print("Claude Code session migration\n")
     print(f"  from : {source}\n         {src_scope.parent.name}/{src_scope.name}")
     print(f"  to   : {target}\n         {dst_scope.parent.name}/{dst_scope.name}")
-    # The account and org uuids appear only in the directory path, never inside
-    # a session entry, so migrating between accounts is a pure path remap.
     same = src_scope.parent.name == dst_scope.parent.name and src_scope.name == dst_scope.name
     print(f"         ({'same account' if same else 'different account, remapping paths'})")
 
@@ -68,7 +60,7 @@ def run_migrate(args: argparse.Namespace) -> int:
     print(f"\n  {len(shadows)} shadow git repo(s) to copy")
 
     if args.dry_run:
-        print("\nDry run — nothing written.")
+        print("\nDry run, nothing written.")
         return 0
     if not args.yes and not _confirm():
         print("Aborted.")
@@ -117,7 +109,7 @@ def _confirm() -> bool:
 
 
 def _validate(files: list[Path], dst_scope: Path) -> bool:
-    """Each entry landed, parses, and points at a transcript that exists."""
+    """each entry landed, parses, and points at a transcript that exists."""
     ok = True
     for path in files:
         dest = dst_scope / path.name

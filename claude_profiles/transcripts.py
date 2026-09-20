@@ -1,9 +1,6 @@
 """The shared Claude Code transcript store at ``~/.claude/projects``.
 
-``<slug>/<sessionId>.jsonl`` is a session. ``<slug>/<sessionId>/subagents/
-agent-<hash>.jsonl`` is a subagent sidechain: it carries the *parent's*
-session id, the app renders it inline inside the parent, and it never gets an
-index entry of its own.
+See docs/session-storage.md.
 """
 
 from __future__ import annotations
@@ -21,14 +18,8 @@ from .paths import cli_projects
 
 SUBAGENT_DIR = "subagents"
 
-# Built-ins that only read state or change Claude's own settings. Nothing here
-# touches project files, the working directory, or anything outside Claude, so
-# a session containing only these records no work.
-#
-# This is an allowlist on purpose: a command that is not named counts as real
-# content, so custom commands, plugin commands and future built-ins keep their
-# session without being enumerated. /init, /rewind, /agents and /mcp are absent
-# deliberately — they write files, restore checkpoints, or change tool state.
+# allowlist on purpose, so an unnamed command counts as real content. /init,
+# /rewind, /agents and /mcp are excluded, they write files or change state.
 ROTE_COMMANDS = frozenset(
     {
         "/help", "/status", "/usage", "/cost", "/context", "/doctor", "/release-notes",
@@ -38,20 +29,14 @@ ROTE_COMMANDS = frozenset(
     }
 )  # fmt: skip
 
-# The CLI writes one slash command as three user turns: a caveat preamble, the
-# command, then its output. That is why a session holding only /exit reports
-# three turns and does not look empty by turn count.
+# one slash command becomes three user turns (caveat, command, output), so a
+# session holding only /exit reports three turns, not one.
 COMMAND_NAME = re.compile(r"<command-name>\s*(/?[\w:.-]+)\s*</command-name>")
 COMMAND_SCAFFOLD = ("<local-command-caveat>", "<local-command-stdout>", "<local-command-stderr>")
 
 
 def slug_for(path: str) -> str:
-    """Encode a path the way the CLI names project folders.
-
-    Separators, underscores and dots all collapse to a hyphen, so the encoding
-    is lossy. A real working directory is always read from inside a transcript,
-    never parsed back out of a folder name.
-    """
+    """Encode a path the way the CLI names project folders."""
     return re.sub(r"[/_.]", "-", path)
 
 
@@ -102,11 +87,7 @@ def parse_line(line: str) -> dict[str, Any]:
 
 
 def message_text(message: Any) -> str:
-    """What a turn says, ignoring tool results and images.
-
-    A tool result arrives as a user turn with no text block. It is activity,
-    not something the user said, so it never counts as content on its own.
-    """
+    """What a turn says, ignoring tool results and images."""
     if not isinstance(message, dict):
         return ""
     content = message.get("content")
@@ -124,19 +105,12 @@ def message_text(message: Any) -> str:
 def classify_content(
     raw: list[str], parse: Callable[[str], dict[str, Any]]
 ) -> tuple[int, int, list[str]]:
-    """Count user turns, count the real ones, and name the commands that ran.
-
-    A turn is real unless it is command scaffolding or an allowlisted command,
-    so an unrecognised command counts as real content.
-
-    A large transcript is mostly assistant content, so lines are cheaply
-    substring-filtered before being parsed. The filter is deliberately loose;
-    the parsed ``type`` is what decides.
-    """
+    """Count user turns, count the real ones, and name the commands that ran."""
     turns = 0
     real = 0
     commands: list[str] = []
     for line in raw:
+        # cheap substring prefilter, loose by design; the parsed type decides.
         if '"user"' not in line:
             continue
         obj = parse(line)
@@ -199,9 +173,7 @@ def summarize(transcript: Path) -> dict[str, Any] | None:
         "subagents": subagent_count(transcript),
         "commands": commands,
         "isScratch": is_scratch(cwd),
-        # Nothing the user ever said or ran. Always skipped.
         "isEmpty": real == 0 and not commands,
-        # Only allowlisted commands. Skipped under --exclude-rote-commands.
         "isRote": real == 0 and bool(commands),
     }
 
@@ -227,16 +199,12 @@ def derive(lines: list[dict[str, Any]], transcript: Path) -> dict[str, Any]:
     )
     efforts = Counter(d["effort"] for d in lines if isinstance(d.get("effort"), str))
 
-    # The launch directory is the session's folder. Later cwd values are
-    # subdirectories the run stepped into, so the most common value would pick a
-    # subdirectory whenever a run worked mostly below its root. Entries the app
-    # writes always set cwd == originCwd, so the most common value is only a
-    # fallback for a transcript that records no cwd on its first lines.
+    # origin first: the most common cwd would favor a subdirectory the run
+    # stepped into over the session's own launch directory.
     launch = origin or (cwds.most_common(1)[0][0] if cwds else str(Path.home()))
 
-    # The filename is authoritative. A sidechain carries its parent's sessionId
-    # on every line, so trusting the in-file value would let a subagent
-    # transcript masquerade as the session that spawned it.
+    # filename is authoritative: a sidechain carries its parent's sessionId on
+    # every line, so the in-file value would let it masquerade as the parent.
     return {
         "cliSessionId": transcript.stem,
         "isSidechain": SUBAGENT_DIR in transcript.parts

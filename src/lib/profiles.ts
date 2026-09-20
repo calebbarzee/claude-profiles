@@ -58,7 +58,6 @@ function uniqueSlug(name: string, existing: ClaudeProfile[]): string {
   return slug;
 }
 
-/** Creates an empty data directory and registers it. */
 export async function addProfile(name: string): Promise<ClaudeProfile> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Profile name can't be empty");
@@ -91,10 +90,8 @@ export async function removeProfile(
 }
 
 /**
- * Starts a new Claude Desktop instance against this data directory. `-n`
- * forces a new process even when Claude is already running under another
- * profile; `--user-data-dir` is the Electron flag that relocates auth, chats
- * and settings to that folder.
+ * `-n` forces a new process even when Claude already runs under another
+ * profile; `--user-data-dir` relocates auth, chats and settings to dataDir.
  */
 export async function launchClaudeProfile(dataDir: string): Promise<void> {
   await execFileAsync("open", [

@@ -27,7 +27,7 @@ def run(*argv: str) -> int:
 
 
 def fails(capsys, match: str, *argv: str) -> None:
-    """The CLI turns an Abort into exit 1 and a message on stderr."""
+    """the CLI turns an Abort into exit 1 and a message on stderr."""
     assert run(*argv) == 1
     assert match in capsys.readouterr().err
 
@@ -42,7 +42,6 @@ def test_a_session_becomes_an_index_entry(profile, capsys):
     assert entry["title"] == "Real work"
     assert entry["cwd"] == "/work/app"
     assert entry["completedTurns"] == 2
-    # No working directory anywhere still names the template's folder.
     assert {v for _, v in walk_cwds(entry)} == {"/work/app"}
     assert "originals unchanged" in capsys.readouterr().out
 
@@ -119,7 +118,6 @@ def test_an_absorbed_session_is_skipped_when_its_successor_is_present():
 def test_an_absorbed_session_is_kept_when_nothing_accounts_for_it(profile):
     absorbed = make_transcript(title="Orphaned segment")
     scope = profile / "claude-code-sessions" / "acct-0000" / "org-0000"
-    # A different profile knows the lineage, but the successor is nowhere.
     make_profile(
         "other",
         entries=[
@@ -241,7 +239,6 @@ def test_remap_publishes_a_copy_and_leaves_the_original(profile):
     published = find_transcript(entry["cliSessionId"])
     assert published is not None and published != path
     assert path.read_bytes() == original
-    # Sidechains are republished too, or inline subagent blocks render empty.
     assert list((published.parent / published.stem / "subagents").glob("*.jsonl"))
 
 

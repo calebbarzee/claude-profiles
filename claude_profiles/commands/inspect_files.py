@@ -1,17 +1,7 @@
-"""Print the shape of a session file.
-
-Two formats hold session state and they are not the same thing:
-
-``local_*.json``
-    Claude Desktop's session index. One object per session, in a profile's
-    ``claude-code-sessions/<account>/<org>/``, pointing at a transcript.
-``*.jsonl``
-    The Claude Code CLI's transcript. One JSON object per line, holding the
-    conversation itself.
-
-Both schemas are undocumented and change between app versions, so check field
-names here before trusting a tool that writes them. Long values are elided and
-no message body is printed, so output is safe to paste into an issue.
+"""print the shape of a session file: Claude Desktop's ``local_*.json`` index
+entry, or the CLI's ``*.jsonl`` transcript. both schemas are undocumented and
+change between app versions; long values are elided and no message body is
+printed, so output is safe to paste into an issue.
 """
 
 from __future__ import annotations
@@ -92,7 +82,6 @@ def report_transcript(path: Path) -> None:
 def run_inspect(args: argparse.Namespace) -> int:
     target = (args.path or default_profile()).expanduser()
 
-    # A directory means "find me an index entry to look at".
     if target.is_dir():
         found = sorted((target / "claude-code-sessions").glob("*/*/local_*.json"))
         if not found:

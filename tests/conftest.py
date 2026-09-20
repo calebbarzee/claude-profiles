@@ -1,4 +1,4 @@
-"""Fixtures building a throwaway home directory that looks like a real one."""
+"""fixtures building a throwaway home directory that looks like a real one."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ORG = "org-0000"
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    """Redirect every location the package resolves."""
+    """redirect every location the package resolves."""
     monkeypatch.setenv("HOME", str(tmp_path))
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
         monkeypatch.delenv(var, raising=False)
@@ -26,7 +26,7 @@ def home(tmp_path, monkeypatch):
 
 
 def dump(obj: dict) -> str:
-    """Compact, the way the CLI and the app write these files."""
+    """compact, the way the CLI and the app write these files."""
     return json.dumps(obj, separators=(",", ":"))
 
 
@@ -63,7 +63,7 @@ def make_transcript(
     session_id: str | None = None,
     subagents: int = 0,
 ) -> Path:
-    """Write a CLI transcript the way the CLI would, and return its path."""
+    """write a CLI transcript the way the CLI would, and return its path."""
     session_id = session_id or str(uuid.uuid4())
     folder = paths.cli_projects() / slug_for(cwd)
     folder.mkdir(parents=True, exist_ok=True)
@@ -100,7 +100,7 @@ def make_transcript(
 
 
 def command_transcript(command: str, cwd: str = "/work/project") -> Path:
-    """A session whose only content is one slash command, as the CLI records it."""
+    """a session whose only content is one slash command, as the CLI records it."""
     session_id = str(uuid.uuid4())
     folder = paths.cli_projects() / slug_for(cwd)
     folder.mkdir(parents=True, exist_ok=True)
@@ -142,7 +142,7 @@ TEMPLATE = {
 
 
 def make_profile(name: str = "personal", entries: list[dict] | None = None) -> Path:
-    """A signed-in profile directory with an <account>/<org> scope."""
+    """a signed-in profile directory with an <account>/<org> scope."""
     profile = paths.profiles_root() / name
     scope = profile / "claude-code-sessions" / ACCOUNT / ORG
     scope.mkdir(parents=True, exist_ok=True)

@@ -1,14 +1,8 @@
-"""Generate index entries so CLI sessions show up in a Claude Desktop profile.
+"""generate index entries so CLI sessions show up in a Claude Desktop profile.
 
-A CLI session lives in the shared transcript store; the app lists sessions from
-a per-profile index. The transcript is already on disk, so all that is missing
-is an entry pointing at it.
-
-Nothing here opens a source transcript for writing. Each import records the
-transcript's SHA-256 before and after and fails if it moved. Without
-``--remap`` nothing is written into ``~/.claude`` at all; with it, the
-rewritten copy is published under a new session id and the original stays
-addressable.
+the transcript is already on disk; this only adds an entry pointing at it.
+without ``--remap`` nothing is written into ``~/.claude``; with it, a
+rewritten copy is published under a new session id.
 """
 
 from __future__ import annotations
@@ -46,10 +40,6 @@ from ..transcripts import (
     summarize,
     top_level_transcripts,
 )
-
-# --------------------------------------------------------------------------
-# list
-# --------------------------------------------------------------------------
 
 
 def run_list(args: argparse.Namespace) -> int:
@@ -103,13 +93,8 @@ def run_list(args: argparse.Namespace) -> int:
     return 0
 
 
-# --------------------------------------------------------------------------
-# selection
-# --------------------------------------------------------------------------
-
-
 def _no_content(row: dict[str, Any], args: argparse.Namespace) -> str | None:
-    """Why this session records no work, or None if it does."""
+    """why this session records no work, or None if it does."""
     if row["isEmpty"]:
         return "no user content at all"
     if row["isRote"] and args.exclude_rote_commands:
@@ -134,8 +119,7 @@ class Selection:
 
 
 def select(args: argparse.Namespace, already: dict[str, dict[str, Any]]) -> Selection:
-    """Decide what to import. Nothing already in the profile is picked up
-    unless it is named in ``--overwrite``."""
+    """decide what to import; skip anything already indexed unless named in ``--overwrite``."""
     picked = Selection()
     forced = set(args.overwrite)
 
@@ -146,7 +130,7 @@ def select(args: argparse.Namespace, already: dict[str, dict[str, Any]]) -> Sele
         row = summarize(picked_path)
         why = _no_content(row, args) if row else None
         if why:
-            raise Abort(f"{args.session} has nothing to import — {why}")
+            raise Abort(f"{args.session} has nothing to import: {why}")
         if args.session in already and args.session not in forced:
             picked.skipped[args.session] = already[args.session]
         else:
@@ -172,8 +156,6 @@ def select(args: argparse.Namespace, already: dict[str, dict[str, Any]]) -> Sele
             cli_id = row["cliSessionId"]
             if cli_id in already:
                 continue
-            # Skip an absorbed session only when its successor is present, or
-            # this run would drop a conversation nothing else accounts for.
             merged = lineage.get(cli_id)
             if (
                 merged
@@ -203,7 +185,7 @@ def select(args: argparse.Namespace, already: dict[str, dict[str, Any]]) -> Sele
             raise Abort(f"no session {cli_id}. Use `claude-profiles list` to browse.")
         row = summarize(path)
         if row and row["isEmpty"]:
-            raise Abort(f"{cli_id} has nothing to import — no user content at all")
+            raise Abort(f"{cli_id} has nothing to import: no user content at all")
         if path not in picked.targets:
             picked.targets.append(path)
             if row:
@@ -213,20 +195,10 @@ def select(args: argparse.Namespace, already: dict[str, dict[str, Any]]) -> Sele
     return picked
 
 
-# --------------------------------------------------------------------------
-# remap
-# --------------------------------------------------------------------------
-
-
 def remap_line(
     obj: dict[str, Any], old: str, new: str, content_too: bool
 ) -> tuple[dict[str, Any], int]:
-    """Rewrite paths in one transcript line.
-
-    Structural mode touches only fields naming a working directory. Content
-    mode re-serialises the line, which also reaches paths quoted inside message
-    bodies and tool output.
-    """
+    """rewrite paths in one transcript line; content mode also reaches paths in message bodies."""
     if content_too:
         raw = json.dumps(obj)
         hits = raw.count(old)
@@ -257,7 +229,7 @@ def rewrite_file(src: Path, dst: Path, old: str, new: str, content_too: bool, ne
 def _republish(
     transcript: Path, run: Path, remap: tuple[str, str], content_too: bool
 ) -> dict[str, Any]:
-    """Write a path-rewritten copy of a transcript under a new session id."""
+    """write a path-rewritten copy of a transcript under a new session id."""
     old, new = remap
     new_id = str(uuid.uuid4())
     staged = run / "work" / transcript.name
@@ -271,8 +243,8 @@ def _republish(
     target_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(staged, published)
 
-    # Republish sidechains alongside the parent, or the inline subagent blocks
-    # in the migrated session render empty.
+    # sidechains must be republished with the parent, or the inline subagent
+    # blocks in the migrated session render empty.
     published_agents = None
     source_agents = subagent_dir_for(transcript)
     if source_agents.is_dir():
@@ -290,11 +262,6 @@ def _republish(
         "agents": published_agents,
         "hits": hits,
     }
-
-
-# --------------------------------------------------------------------------
-# import one session
-# --------------------------------------------------------------------------
 
 
 def import_one(
@@ -337,9 +304,7 @@ def import_one(
     if dest.exists():
         raise Abort(f"refusing to overwrite {dest}")
 
-    # Replacing an entry only happens under --overwrite, and only when that
-    # entry is this session. An entry that merely absorbed this one belongs to
-    # a later session and is never removed.
+    # an entry that merely absorbed this session is never removed.
     replaced: Path | None = None
     backup: Path | None = None
     if replaces and replaces["via"] == "cliSessionId":
@@ -353,15 +318,13 @@ def import_one(
 
     dest.write_text(json.dumps(entry))
 
-    # A session still being written keeps appending to its own transcript, so
-    # its hash is a moving target. Roll this one back rather than aborting a
-    # batch whose manifest does not exist yet.
+    # roll back rather than abort a batch whose manifest does not exist yet.
     if sha256(transcript) != digest and not args.allow_live:
         dest.unlink(missing_ok=True)
         if backup and replaced:
             shutil.copy2(backup, replaced)
         return {
-            "skipped": "transcript changed during import — that session is still running",
+            "skipped": "transcript changed during import; that session is still running",
             "title": facts["title"],
             "sourceCliSessionId": facts["cliSessionId"],
         }
@@ -385,16 +348,8 @@ def import_one(
         "replacedEntryPath": str(replaced) if replaced else None,
         "replacedEntryBackup": str(backup) if backup else None,
         "relocatedFrom": original_cwd if cwd_override else None,
-        # Imported under --allow-live: its hash was always going to move, so the
-        # end-of-run check cannot assert on it. The app reads the transcript
-        # itself, so later turns still appear.
         "wasLive": args.allow_live and sha256(transcript) != digest,
     }
-
-
-# --------------------------------------------------------------------------
-# reports
-# --------------------------------------------------------------------------
 
 
 def _report_skipped(skipped: dict[str, dict[str, Any]], profile: Path) -> None:
@@ -442,8 +397,6 @@ def _validate(records: list[dict[str, Any]]) -> bool:
             print(f"  FAIL index points at missing transcript: {pointed}")
             ok = False
 
-        # Every working-directory field, nested ones included, must name this
-        # session's folder. A mismatch means a template path carried through.
         stray = [f"{at}={v}" for at, v in walk_cwds(written) if v != rec["cwd"]]
         if stray:
             print(f"  FAIL wrong working directory in {entry_path.name}: {', '.join(stray)}")
@@ -459,11 +412,6 @@ def _validate(records: list[dict[str, Any]]) -> bool:
         if live:
             print(f"      {live} still running, hash not asserted (--allow-live)")
     return ok
-
-
-# --------------------------------------------------------------------------
-# run
-# --------------------------------------------------------------------------
 
 
 def run_import(args: argparse.Namespace) -> int:
@@ -486,7 +434,7 @@ def run_import(args: argparse.Namespace) -> int:
     if not profile.is_dir():
         raise Abort(f"target profile not found: {profile}")
     if profile_is_running(profile):
-        raise Abort("a Claude instance is running on the target profile — quit it first")
+        raise Abort("a Claude instance is running on the target profile; quit it first")
 
     scope = session_scope(profile)
     template, template_path = load_template(scope, args.template)
@@ -497,7 +445,7 @@ def run_import(args: argparse.Namespace) -> int:
     unknown = set(args.overwrite) - set(already)
 
     if not picked.targets:
-        print("Nothing to import — every session is already in this profile.")
+        print("Nothing to import; every session is already in this profile.")
         _report_skipped(picked.skipped, profile)
         _report_contentless(picked.contentless)
         return 0
@@ -530,7 +478,7 @@ def run_import(args: argparse.Namespace) -> int:
     _report_contentless(picked.contentless)
 
     if args.dry_run:
-        print("Dry run — nothing written.")
+        print("Dry run, nothing written.")
         return 0
 
     run = new_run("import", args.staging)

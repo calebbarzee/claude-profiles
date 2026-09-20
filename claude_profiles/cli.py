@@ -30,7 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 
-    # -- profile -----------------------------------------------------------
     profile = sub.add_parser("profile", help="create, list, open and forget profiles")
     actions = profile.add_subparsers(dest="action", required=True, metavar="ACTION")
 
@@ -51,13 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("--purge", action="store_true", help="also delete its login and chats")
     remove.set_defaults(handler=profiles.run_remove)
 
-    # -- list --------------------------------------------------------------
     listing = sub.add_parser("list", help="list Claude Code CLI sessions")
     listing.add_argument("--profile", help="mark sessions this profile already has")
     listing.add_argument("--limit", type=int, default=20, help="rows to show (default 20)")
     listing.set_defaults(handler=importer.run_list)
 
-    # -- import ------------------------------------------------------------
     imp = sub.add_parser(
         "import",
         help="surface CLI sessions in a profile",
@@ -116,7 +113,6 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     imp.set_defaults(handler=importer.run_import)
 
-    # -- migrate -----------------------------------------------------------
     mig = sub.add_parser(
         "migrate",
         help="copy the session index between profiles",
@@ -130,7 +126,6 @@ def build_parser() -> argparse.ArgumentParser:
     mig.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     mig.set_defaults(handler=migrate.run_migrate)
 
-    # -- backup ------------------------------------------------------------
     back = sub.add_parser(
         "backup",
         help="snapshot profile session state",
@@ -142,7 +137,6 @@ def build_parser() -> argparse.ArgumentParser:
     back.add_argument("--all", action="store_true", help="every profile on this machine")
     back.set_defaults(handler=backup.run_backup)
 
-    # -- optimize ----------------------------------------------------------
     opt = sub.add_parser(
         "optimize",
         help="clear stale state from index entries",
@@ -167,7 +161,6 @@ def build_parser() -> argparse.ArgumentParser:
     opt.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     opt.set_defaults(handler=optimize.run_optimize)
 
-    # -- undo --------------------------------------------------------------
     rollback = sub.add_parser("undo", help="reverse a previous run")
     rollback.add_argument("run", nargs="?", type=Path, metavar="RUN", help="a run directory")
     rollback.add_argument("--last", action="store_true", help="the most recent run")
@@ -177,7 +170,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rollback.set_defaults(handler=undo.run_undo)
 
-    # -- inspect -----------------------------------------------------------
     insp = sub.add_parser(
         "inspect",
         help="print the shape of an index entry or a transcript",

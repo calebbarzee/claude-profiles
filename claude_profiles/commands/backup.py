@@ -1,8 +1,7 @@
-"""Snapshot the state in a profile that cannot be regenerated.
+"""snapshot the state in a profile that cannot be regenerated.
 
-Most of a profile directory is downloadable runtime and browser cache, and is
-excluded. So are cookies and other credential stores: a snapshot should be safe
-to keep around, so sign in again rather than restoring auth from one.
+runtime, browser cache, cookies and other credential stores are excluded;
+sign in again rather than restoring auth from a backup.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from pathlib import Path
 from .. import Abort
 from ..paths import default_profile, profile_roots, resolve_profile
 
-# State worth keeping, relative to a profile root.
 ITEMS = (
     "claude-code-sessions",
     "local-agent-mode-sessions",
@@ -27,7 +25,6 @@ ITEMS = (
     "claude_desktop_config.json",
 )
 
-# Built-in skills the app rebuilds on demand, a few MB per profile.
 PRUNE = ("local-agent-mode-sessions/skills-plugin",)
 
 
@@ -60,7 +57,6 @@ def run_backup(args: argparse.Namespace) -> int:
             print(f"  skip {profile} (not a directory)")
             continue
         profile = profile.resolve()
-        # The default profile and a created one can share a basename.
         label = "default" if profile == default_profile().resolve() else profile.name
         dest = out / label
         dest.mkdir(parents=True, exist_ok=True)

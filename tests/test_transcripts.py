@@ -51,15 +51,15 @@ def test_a_rote_only_session_is_marked_rote_not_empty():
     row = tr.summarize(command_transcript("/exit"))
     assert row["isRote"] and not row["isEmpty"]
     assert row["commands"] == ["/exit"]
-    # The CLI records one command as three user turns, so turn count alone
-    # would not have revealed this.
+    # the CLI records one command as three user turns, so turn count alone
+    # would not have revealed this
     assert row["turns"] == 3
 
 
 def test_a_session_with_no_user_content_is_marked_empty():
     path = make_transcript(title="Only tooling")
-    # A tool result arrives as a user turn with no text block: activity, not
-    # something the user said.
+    # a tool result arrives as a user turn with no text block: activity, not
+    # something the user said
     path.write_text(
         dump(
             {

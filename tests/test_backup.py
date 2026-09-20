@@ -11,7 +11,7 @@ def run(*argv: str) -> int:
 
 
 def stocked(profile):
-    """Add the runtime and cache a real profile carries alongside its state."""
+    """add the runtime and cache a real profile carries alongside its state."""
     for junk in ("claude-code/bin", "Cache/data", "local-agent-mode-sessions/skills-plugin/s"):
         path = profile / junk
         path.mkdir(parents=True, exist_ok=True)
@@ -30,7 +30,7 @@ def test_backup_keeps_session_state_and_drops_runtime(tmp_path):
     assert (kept / "claude-code-sessions" / ACCOUNT / ORG / "local_a.json").is_file()
     assert (kept / "local-agent-mode-sessions" / "kept.json").is_file()
     assert (kept / "config.json").is_file()
-    # Runtime, caches and built-in skills are re-downloaded or rebuilt.
+    # runtime, caches and built-in skills are re-downloaded or rebuilt
     assert not (kept / "claude-code").exists()
     assert not (kept / "Cache").exists()
     assert not (kept / "local-agent-mode-sessions" / "skills-plugin").exists()

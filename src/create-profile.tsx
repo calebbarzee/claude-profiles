@@ -15,7 +15,6 @@ interface FormValues {
 }
 
 interface Props {
-  /** Called after a profile is successfully created, so the list view can refresh. */
   onCreated?: () => void;
 }
 
@@ -67,7 +66,7 @@ export default function CreateProfile({ onCreated }: Props) {
         onChange={() => setNameError(undefined)}
         autoFocus
       />
-      <Form.Description text="Creates an isolated login for Claude Desktop — sign in fresh the first time you open it." />
+      <Form.Description text="Creates an isolated login for Claude Desktop. Sign in fresh the first time you open it." />
       <Form.Checkbox
         id="launchNow"
         label="Open Claude with this profile now"

@@ -35,6 +35,12 @@ one session never ride along to another.
 `tools/permission-audit.sh` recovers the valid enum values from the app bundle.
 Re-run it after an app update before trusting a large import.
 
+Confirmed against app.asar: `chromePermissionMode` admits
+`skip_all_permission_checks` and `always_ask`; `permissionMode` is currently
+assigned `ask`, `default`, or `acceptEdits`, with `auto`, `plan`,
+`bypassPermissions`, and `dontAsk` present as further literals. `import` falls
+back to `ask` and `always_ask` when no default is set.
+
 ## Stale run state
 
 `error`, `errorAt` and `priorErrorMark` record something that happened to the

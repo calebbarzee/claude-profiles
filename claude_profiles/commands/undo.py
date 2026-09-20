@@ -1,7 +1,7 @@
-"""Reverse a previous run from its manifest.
+"""reverse a previous run from its manifest.
 
-Only files a run created are deleted, and only entries it replaced are
-restored. A source transcript is never touched; it is re-hashed and reported.
+only files a run created are deleted, and only entries it replaced are
+restored. a source transcript is never touched; it is re-hashed and reported.
 """
 
 from __future__ import annotations
@@ -36,8 +36,7 @@ def _undo_import(rec: dict[str, Any]) -> None:
             print(f"  restored index {target_path.name}")
 
     published = rec.get("publishedTranscript")
-    # Only ever delete a transcript this tool published; the original is
-    # identified by path and never touched.
+    # only a published copy is deleted, never the original.
     if published and published != rec["originalTranscript"] and Path(published).exists():
         Path(published).unlink()
         print(f"  removed copy {Path(published).name}")
@@ -63,7 +62,7 @@ def _undo_optimize(rec: dict[str, Any]) -> None:
 
 
 def _undo_migrate(rec: dict[str, Any]) -> None:
-    """Restore what a copy displaced, or remove what it created."""
+    """restore what a copy displaced, or remove what it created."""
     target, backup = Path(rec["path"]), rec.get("backup")
     if backup:
         shutil.copy2(Path(backup), target)

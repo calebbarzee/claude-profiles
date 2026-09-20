@@ -1,5 +1,4 @@
-# Runs the test suite on Linux, exercising the XDG path branches that never
-# execute on macOS. Claude Desktop itself is not installed or launched.
+# runs the test suite on Linux, exercising XDG path branches macOS never hits
 FROM python:3.11-slim
 
 WORKDIR /src

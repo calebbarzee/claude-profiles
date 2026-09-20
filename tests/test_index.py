@@ -154,30 +154,24 @@ def test_build_entry_applies_the_field_policy():
     perms = {"permissionMode": "ask", "chromePermissionMode": "always_ask"}
     entry, tally = index.build_entry(template_entry(), FACTS, "cli-real", perms)
 
-    # DERIVED: read from the transcript, never from the template.
     assert entry["cliSessionId"] == "cli-real"
     assert entry["title"] == "Real session"
     assert entry["completedTurns"] == 4
     assert entry["sessionId"].startswith("local_")
 
-    # PERMISSION: resolved, never inherited.
     assert entry["permissionMode"] == "ask"
     assert entry["chromePermissionMode"] == "always_ask"
 
-    # NEUTRAL: per-session grants never ride along.
     assert entry["alwaysAllowedReasons"] == []
     assert entry["sessionPermissionUpdates"] == []
     assert entry["priorCliSessionIds"] == []
     assert entry["remoteMcpServersConfig"] == []
 
-    # DROPPED: stale run state is absent, not emptied.
     assert "error" not in entry
     assert "errorAt" not in entry
 
-    # APP_TRUTH: an unrecognised field carries through untouched.
     assert entry["aFutureFieldTheAppAdded"] == {"kept": True}
 
-    # RETARGETED: no working directory still names the template's folder.
     assert all(value == "/work/project" for _, value in index.walk_cwds(entry))
     assert tally["RETARGETED"] == 1
 

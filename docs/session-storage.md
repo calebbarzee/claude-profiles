@@ -33,6 +33,9 @@ parent and never gives it an index entry, so `import` refuses to treat one as a
 session. When `--remap` republishes a parent, the whole subagents directory is
 republished with it, or those inline blocks render empty.
 
+Each sidechain file carries an `agentId` matching its own filename,
+`isSidechain` true on every line, and `sessionKind` `"bg"`.
+
 `tools/trace-subagents.sh` re-establishes this layout against live data.
 
 ## Scratch workspaces

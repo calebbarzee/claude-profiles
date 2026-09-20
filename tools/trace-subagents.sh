@@ -1,26 +1,7 @@
 #!/usr/bin/env bash
-#
-# trace-subagents.sh — how a transcript links to its subagent sidechains, and
-# why a sidechain never gets its own index entry. macOS only.
-#
-# WHAT THIS ESTABLISHED
-#
-# The transcript store nests subagent work one level down:
-#
-#   <slug>/<sessionId>.jsonl                         a real session
-#   <slug>/<sessionId>/subagents/agent-<hash>.jsonl  a subagent sidechain
-#
-# A sidechain carries the PARENT's sessionId on every line, plus its own
-# agentId matching its filename, isSidechain true throughout, and sessionKind
-# "bg". A shared promptId joins the parent's user turn to the whole sidechain.
-#
-# The app therefore renders subagent work inline inside the parent turn and
-# gives sidechains no index entry. That is why `claude-profiles import` refuses
-# to import one, and why --remap republishes the subagents directory alongside
-# a parent.
-#
-# Re-run after a Claude Desktop update to check the layout still holds.
-#
+# trace-subagents.sh checks how a transcript links to its subagent
+# sidechains. macOS only.
+# See docs/session-storage.md.
 set -euo pipefail
 
 CLI_PROJECTS="$HOME/.claude/projects"
@@ -62,17 +43,17 @@ echo "sidechains: $(find "$AGENTS" -name '*.jsonl' 2>/dev/null | wc -l | tr -d '
 echo
 
 echo "=== do any desktop index entries point at a sidechain? ==="
-found=0
+FOUND=0
 for f in "$APP_SUPPORT"/Claude*/claude-code-sessions/*/*/local_*.json \
          "$APP_SUPPORT"/Claude\ Profiles/*/claude-code-sessions/*/*/local_*.json; do
   [ -f "$f" ] || continue
-  found=1
+  FOUND=1
   python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 print("  %s  %s" % (d.get("cliSessionId", "?"), d.get("title", "")[:44]))' "$f"
 done
-[ "$found" -eq 1 ] || echo "  (no index entries found)"
+[ "$FOUND" -eq 1 ] || echo "  (no index entries found)"
 echo "  Compare these ids against the sidechain filenames below: no overlap"
 echo "  means the app never indexes a sidechain."
 echo

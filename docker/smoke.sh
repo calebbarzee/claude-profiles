@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
-# Linux-only check: a created profile writes a launcher, a badge and a registry
-# entry under the XDG directories, and the CLI finds it again by id.
+# checks a created profile writes its launcher, badge and registry entry under XDG dirs
 set -eu
 
 export HOME=/tmp/smoke

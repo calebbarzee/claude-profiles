@@ -19,7 +19,6 @@ def test_undo_removes_what_an_import_created():
 
     assert run("undo", "--last") == 0
     assert not any(e["cliSessionId"] == path.stem for e in read_entries(profile))
-    # The source transcript is only ever verified, never touched.
     assert path.is_file()
 
 

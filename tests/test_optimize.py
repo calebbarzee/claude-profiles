@@ -15,7 +15,7 @@ def run(*argv: str) -> int:
 
 
 def imported_profile():
-    """A profile holding one generated entry and one the app wrote."""
+    """a profile holding one generated entry and one the app wrote."""
     profile = make_profile(entries=[template_entry()])
     run("import", "--to", str(profile), "--session", make_transcript().stem)
     return profile
@@ -24,7 +24,7 @@ def imported_profile():
 def test_optimize_only_touches_generated_entries_by_default(capsys):
     profile = imported_profile()
     assert run("optimize", "--to", str(profile), "--clear-errors") == 0
-    # The app-written template still carries its own real error.
+    # the app-written template still carries its own real error
     assert any("error" in e for e in read_entries(profile))
     assert "1 generated" in capsys.readouterr().out
 
@@ -89,7 +89,7 @@ def test_optimize_reports_when_nothing_matches(capsys):
     assert "Nothing to change" in capsys.readouterr().out
 
 
-def test_optimize_can_be_limited_to_one_entry(capsys):
+def test_optimize_can_be_limited_to_one_entry():
     profile = make_profile(
         entries=[template_entry(sessionId="local_a"), template_entry(sessionId="local_b")]
     )
