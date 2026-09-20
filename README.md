@@ -124,10 +124,10 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest && .venv/bin/ruff check . && .venv/bin/mypy claude_profiles
 ```
 
-The Raycast extension:
+The Raycast extension lives in `raycast/`:
 
 ```bash
-npm install && npm run dev
+cd raycast && npm install && npm run dev
 ```
 
 `tools/` holds forensic scripts that document undocumented formats. Each records
@@ -139,9 +139,9 @@ update tells you whether that finding still holds. They are macOS-only.
 | `trace-subagents.sh` | the sidechain layout and the `promptId` join |
 | `permission-audit.sh` | where permission settings live, and their valid enums |
 | `sample-brand-color.sh` | the brand hex, sampled from an app icon |
-| `make-icon.sh` | rebuilds `assets/icon.png` from `swap_icon.svg` |
+| `make-icon.sh` | rebuilds `raycast/assets/icon.png` from `swap_icon.svg` |
 
-`assets/icon.png` is tinted `#D97757`, the most common opaque non-white pixel in
+`raycast/assets/icon.png` is tinted `#D97757`, the most common opaque non-white pixel in
 Claude Desktop's own icon. Rebuilding it needs `rsvg-convert` (`brew install
 librsvg`, or `apt install librsvg2-bin`). The source artwork is "swap" by Evan
 Shuster, from the Noun Project.
